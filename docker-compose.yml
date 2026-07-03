@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────
-# LLMGov — Docker Compose (Infrastructure Services)
+# LLMGov — Docker Compose
 # ──────────────────────────────────────────────────────────────
-# W1-C1: Redis + ClickHouse only. Gateway container added in W1-C2.
+# W1-C2: Redis + ClickHouse + Gateway.
 # Ollama added in Week 2 when the fallback provider is wired.
 # ──────────────────────────────────────────────────────────────
 
@@ -34,6 +34,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+
+  # ── LLMGov Gateway ──
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CLICKHOUSE_URL=http://clickhouse:8123
     restart: unless-stopped
 
 volumes:

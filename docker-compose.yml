@@ -1,0 +1,41 @@
+# ──────────────────────────────────────────────────────────────
+# LLMGov — Docker Compose (Infrastructure Services)
+# ──────────────────────────────────────────────────────────────
+# W1-C1: Redis + ClickHouse only. Gateway container added in W1-C2.
+# Ollama added in Week 2 when the fallback provider is wired.
+# ──────────────────────────────────────────────────────────────
+
+services:
+  # ── Cache, Auth, Rate Limiting, Embedding Store ──
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Analytical Telemetry & Audit Log ──
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native TCP interface
+    volumes:
+      - ch_data:/var/lib/clickhouse
+      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  ch_data:

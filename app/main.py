@@ -1,8 +1,10 @@
 """
 LLMGov — Gateway Application Entry Point
 
-FastAPI application with health check. Additional routes
-(completions, registry, eval) are mounted in later chunks.
+FastAPI application with health check, structured logging,
+request-ID correlation, and global error handling wired in.
+Additional routes (completions, registry, eval) are mounted
+in later chunks.
 """
 
 from contextlib import asynccontextmanager
@@ -13,6 +15,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.config.settings import settings
+from app.core.logging import get_logger, setup_logging
+from app.middleware.error_handler import register_exception_handlers
+from app.middleware.request_id import RequestIDMiddleware
+
+# ── Initialize structured logging before anything else ──
+setup_logging(level=settings.log_level)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -20,11 +29,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown lifecycle hook."""
     # ── Startup ──
     # Connection pools (Redis, ClickHouse) will be initialized here
-    # in later chunks. For now, just log readiness.
-    print(f"LLMGov gateway starting on {settings.gateway_host}:{settings.gateway_port}")
+    # in later chunks.
+    logger.info(
+        "LLMGov gateway starting",
+        extra={"model": None, "provider": None},
+    )
     yield
     # ── Shutdown ──
-    print("LLMGov gateway shutting down")
+    logger.info("LLMGov gateway shutting down")
 
 
 app = FastAPI(
@@ -38,6 +50,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# ── Middleware (order matters: outermost runs first) ──
+app.add_middleware(RequestIDMiddleware)
+
+# ── Exception handlers ──
+register_exception_handlers(app)
 
 
 @app.get("/health", tags=["ops"])

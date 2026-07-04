@@ -1,0 +1,48 @@
+# ──────────────────────────────────────────────
+# LLMGov .dockerignore
+# ──────────────────────────────────────────────
+# Keep the build context lean and secret-free.
+
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Secrets — never bake into an image
+.env
+.env.*
+
+# Documentation & tests (not needed at runtime)
+docs/
+tests/
+*.md
+LICENSE
+
+# Docker-in-Docker noise
+docker-compose.yml
+docker/
+
+# Dev tooling
+.pre-commit-config.yaml
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/

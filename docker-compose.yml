@@ -1,7 +1,15 @@
 # ──────────────────────────────────────────────────────────────
 # LLMGov — Docker Compose
 # ──────────────────────────────────────────────────────────────
-# W1-C2: Redis + ClickHouse + Gateway.
+# Usage:
+#   Full stack (grading/demo):  docker compose up
+#   Infra-only (local dev):    docker compose up redis clickhouse
+#
+# "Full stack" is the default because Milestone 1 grading depends
+# on `docker compose up` bringing up everything cleanly.
+# For local development, run infra-only and start the gateway
+# with `uvicorn app.main:app --reload` for hot-reload.
+#
 # Ollama added in Week 2 when the fallback provider is wired.
 # ──────────────────────────────────────────────────────────────
 
@@ -56,3 +64,4 @@ services:
 volumes:
   redis_data:
   ch_data:
+

@@ -1,28 +1,33 @@
 """
-LLMGov — Request ID Correlation Middleware
+LLMGov — Request ID + Error Handling Middleware
 
-Generates or propagates a trace_id (UUID4) for every request:
-  1. Reads X-Request-ID from the incoming request header (if present).
-  2. Falls back to generating a new uuid4.
-  3. Stores it in a contextvars.ContextVar so any code in the call
-     stack (logging, telemetry writes, error responses) can access
-     the same trace_id without explicit parameter passing.
-  4. Adds X-Request-ID to the response headers.
+Combined middleware that:
+  1. Generates/propagates X-Request-ID (trace_id) via contextvars.
+  2. Catches all unhandled exceptions and returns structured JSON
+     error responses — solving the Starlette BaseHTTPMiddleware
+     exception-handler ordering issue where @app.exception_handler
+     doesn't catch exceptions that bubble through outer middleware.
 
-This is the birth point of trace_id, which appears as the first column
-in every ClickHouse table (llm_metrics, llm_audit_logs, llm_eval_results).
+This is the outermost middleware, so it sees every request and every
+exception. Error responses include trace_id for correlation.
 """
 
+import json
+import traceback
 import uuid
 from contextvars import ContextVar
 from typing import Optional
 
+import logging
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse
 
 # ── Context variable: accessible from any async code in the request ──
 _request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+
+logger = logging.getLogger(__name__)
 
 
 def get_request_id() -> Optional[str]:
@@ -31,7 +36,11 @@ def get_request_id() -> Optional[str]:
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """ASGI middleware that manages X-Request-ID propagation."""
+    """
+    ASGI middleware that:
+    - Manages X-Request-ID propagation
+    - Catches unhandled exceptions (outermost error boundary)
+    """
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -45,5 +54,33 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             return response
+        except Exception as exc:
+            # ── This is the real error boundary ──
+            logger.error(
+                "Unhandled exception",
+                extra={"status_code": 500},
+                exc_info=exc,
+            )
+
+            # Include traceback only when running in debug mode
+            detail: str | None = None
+            if logger.isEnabledFor(10):  # DEBUG level
+                detail = traceback.format_exc()
+
+            error_response = JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "type": "internal_error",
+                        "message": (
+                            "An internal error occurred." if not detail else str(exc)
+                        ),
+                        "trace_id": request_id,
+                        **({"detail": detail} if detail else {}),
+                    }
+                },
+            )
+            error_response.headers["X-Request-ID"] = request_id
+            return error_response
         finally:
             _request_id_ctx.reset(token)

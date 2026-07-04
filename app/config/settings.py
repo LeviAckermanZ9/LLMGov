@@ -26,9 +26,13 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     clickhouse_url: str = "http://localhost:8123"
 
-    # ── LLM Provider Keys (wired in W1-C3) ──
+    # ── LLM Provider Keys ──
+    gemini_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+
+    # ── Default Model (single-provider path, W1-C3) ──
+    default_model: str = "gemini/gemini-2.5-flash"
 
 
 settings = Settings()

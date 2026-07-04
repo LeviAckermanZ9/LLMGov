@@ -40,7 +40,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         if logger.isEnabledFor(10):  # DEBUG level
             detail = traceback.format_exc()
 
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content={
                 "error": {
@@ -51,3 +51,5 @@ def register_exception_handlers(app: FastAPI) -> None:
                 }
             },
         )
+        response.headers["X-Request-ID"] = trace_id
+        return response

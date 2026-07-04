@@ -3,8 +3,8 @@ LLMGov — Gateway Application Entry Point
 
 FastAPI application with health check, structured logging,
 request-ID correlation, and global error handling wired in.
-Additional routes (completions, registry, eval) are mounted
-in later chunks.
+Chat completions route is live (W1-C3). Additional routes
+(registry, eval) are mounted in later chunks.
 """
 
 from contextlib import asynccontextmanager
@@ -14,9 +14,9 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from app.api.completions import router as completions_router
 from app.config.settings import settings
 from app.core.logging import get_logger, setup_logging
-from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_id import RequestIDMiddleware
 
 # ── Initialize structured logging before anything else ──
@@ -51,11 +51,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Middleware (order matters: outermost runs first) ──
+# ── Middleware (outermost = runs first, handles errors + request-ID) ──
 app.add_middleware(RequestIDMiddleware)
 
-# ── Exception handlers ──
-register_exception_handlers(app)
+# ── Routers ──
+app.include_router(completions_router)
 
 
 @app.get("/health", tags=["ops"])

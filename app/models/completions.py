@@ -42,9 +42,9 @@ class ChatCompletionRequest(BaseModel):
         description="Sampling temperature (0.0–2.0)",
     )
     max_tokens: Optional[int] = Field(
-        default=None,
+        default=1024,
         gt=0,
-        description="Maximum tokens in the completion",
+        description="Maximum tokens in the completion (default 1024)",
     )
     stream: bool = Field(
         default=False,

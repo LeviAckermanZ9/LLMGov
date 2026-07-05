@@ -34,11 +34,14 @@ services:
     ports:
       - "8123:8123"   # HTTP interface
       - "9000:9000"   # Native TCP interface
+    environment:
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_PASSWORD=llmgov_dev
     volumes:
       - ch_data:/var/lib/clickhouse
       - ./docker/clickhouse/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      test: ["CMD", "clickhouse-client", "--password", "llmgov_dev", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -59,6 +62,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_PASSWORD=llmgov_dev
     restart: unless-stopped
 
 volumes:

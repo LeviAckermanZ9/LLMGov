@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # ── Infrastructure ──
     redis_url: str = "redis://localhost:6379"
     clickhouse_url: str = "http://localhost:8123"
+    clickhouse_password: str = "llmgov_dev"
 
     # ── LLM Provider Keys ──
     gemini_api_key: str = ""

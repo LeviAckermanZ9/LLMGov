@@ -14,6 +14,7 @@ from fastapi import APIRouter
 
 from app.config.settings import settings
 from app.core.logging import get_logger
+from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
 from app.models.completions import (
     ChatCompletionRequest,
@@ -31,6 +32,11 @@ if settings.gemini_api_key:
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1", tags=["completions"])
+
+
+def _extract_provider(model: str) -> str:
+    """Extract provider name from litellm model string (e.g. 'gemini/gemini-2.5-flash' → 'gemini')."""
+    return model.split("/")[0] if "/" in model else "unknown"
 
 
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
@@ -63,6 +69,7 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
     )
 
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
+    provider = _extract_provider(request.model)
 
     # ── Map LiteLLM response → our Pydantic model ──
     result = ChatCompletionResponse(
@@ -92,10 +99,24 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
         "Completion returned",
         extra={
             "model": result.model,
-            "provider": "gemini",
+            "provider": provider,
             "latency_ms": round(elapsed_ms, 1),
             "status_code": 200,
         },
     )
 
+    # ── W1-C4: Write telemetry row to ClickHouse ──
+    # Uses the same trace_id from X-Request-ID — no second UUID.
+    await write_metrics(
+        trace_id=trace_id,
+        model_requested=request.model,
+        model_used=result.model,
+        provider=provider,
+        total_duration_ms=round(elapsed_ms, 1),
+        status_code=200,
+        prompt_tokens=result.usage.prompt_tokens,
+        completion_tokens=result.usage.completion_tokens,
+    )
+
     return result
+

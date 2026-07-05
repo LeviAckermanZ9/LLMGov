@@ -58,7 +58,7 @@ flowchart TD
     FallbackProvider[Other Providers]:::planned
     
     CH[(ClickHouse\nllm_metrics)]:::built
-    Redis[(Redis\nCache/Limits)]:::built
+    Redis[(Redis\nCache/Limits)]:::planned
     
     Telemetry --> CH
     Auth -.-> Redis
@@ -121,7 +121,7 @@ flowchart TD
    ```bash
    curl http://127.0.0.1:8000/health
    ```
-   Expected response: `{"status":"ok"}`
+   Expected response: `{"status":"healthy","service":"llmgov-gateway","version":"0.1.0","timestamp":"2026-07-05T16:47:18.532641+00:00"}`
 
 ## API Example
 
@@ -142,8 +142,9 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 **Response:**
 ```json
 {
-  "id": "chatcmpl-a1b2c3d4e5",
-  "created": 1704067200,
+  "id": "aIpKauSsOYv8juMP0d_0sAg",
+  "object": "chat.completion",
+  "created": 1783269992,
   "model": "gemini-2.5-flash",
   "choices": [
     {
@@ -160,7 +161,7 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
     "completion_tokens": 55,
     "total_tokens": 69
   },
-  "trace_id": "38b8b8ee-78d6-4254-8766-c321d4c6d30a"
+  "trace_id": "5018d93c-44a9-47a5-a39c-bb5a6c9c6734"
 }
 ```
 

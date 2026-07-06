@@ -16,7 +16,7 @@ WORKDIR /app
 # ── Stage 1: Dependencies ──
 FROM base AS deps
 
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 

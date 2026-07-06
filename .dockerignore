@@ -33,6 +33,7 @@ env/
 docs/
 tests/
 *.md
+!README.md
 LICENSE
 
 # Docker-in-Docker noise

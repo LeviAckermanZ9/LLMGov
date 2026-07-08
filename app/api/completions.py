@@ -113,7 +113,8 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         # If the completion fails, we must bubble it up (500)
         raise completion_result
         
-    response = completion_result
+    import typing
+    response = typing.cast(litellm.ModelResponse, completion_result)
     
     if isinstance(embedding_result, Exception):
         # If the embedding fails, we log it and continue without vector

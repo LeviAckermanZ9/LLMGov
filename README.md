@@ -11,6 +11,7 @@ A production-grade LLM gateway that unifies routing, semantic caching, safety gu
 ![ClickHouse](https://img.shields.io/badge/ClickHouse-24.3+-FFCC01?style=flat&logo=clickhouse&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat&logo=pydantic&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat&logo=google&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local-white?style=flat&logo=ollama&logoColor=black)
 
 ## What This Is
 
@@ -22,6 +23,7 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 flowchart TD
     %% Define Styles
     classDef built fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
+    classDef partial fill:#fb8c00,stroke:#e65100,stroke-width:4px,color:white;
     classDef planned fill:#eeeeee,stroke:#999999,stroke-width:2px,stroke-dasharray: 5 5,color:#555555;
 
     Client([Client App]) --> Gateway
@@ -34,7 +36,7 @@ flowchart TD
         Ingest --> Auth
         
         subgraph Interceptors [Middleware Checks]
-            Cache[Semantic Cache]:::planned
+            Cache[Semantic Cache]:::partial
             Guard[Safety Guardrails]:::planned
             Eval[Auto-Evaluator]:::planned
         end
@@ -55,10 +57,10 @@ flowchart TD
     end
     
     PrimaryProvider[Gemini 2.5 Flash]:::built
-    FallbackProvider[Other Providers]:::planned
+    FallbackProvider[Ollama (Local Fallback)]:::partial
     
     CH[(ClickHouse\nllm_metrics)]:::built
-    Redis[(Redis\nCache/Limits)]:::planned
+    Redis[(Redis\nCache/Limits)]:::partial
     
     Telemetry --> CH
     Auth -.-> Redis
@@ -78,8 +80,11 @@ flowchart TD
 | ![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white) **ClickHouse** | Columnar database designed for massive OLAP workloads; handles high-throughput telemetry writes without blocking the hot path. |
 | ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white) **Pydantic** | Provides robust, type-safe data validation and serialization for API contracts, ensuring strict compliance with expected schemas. |
 | ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized as the primary single-provider integration via LiteLLM to normalize interactions before expanding to multi-provider routing. |
+| ![Ollama](https://img.shields.io/badge/Ollama-white?style=flat&logo=ollama&logoColor=black) **Ollama (qwen2.5:0.5b)** | Local fallback provider used to prove routing and circuit breaker mechanisms work under strict 4GB VRAM constraints, prioritizing architectural validation over model intelligence. |
 
 ## Current Status
+
+*Note: The project currently uses a three-state system (Live, Partial, Planned) because this branch represents a mid-integration draft. Some components are wired functionally but are missing their final algorithmic implementations or routing connections, which will be finalized before merging to main.*
 
 | Feature | Status | Description |
 | :--- | :--- | :--- |
@@ -87,8 +92,9 @@ flowchart TD
 | **Observability (Core)** | Live | Structured JSON logging, `X-Request-ID` correlation (`trace_id`), global error handling. |
 | **Completions API** | Live | Single-provider proxy (`POST /v1/chat/completions`) using Gemini 2.5 Flash via LiteLLM. |
 | **Telemetry (Write-Path)** | Live | Asynchronous writes to ClickHouse `llm_metrics` table upon successful completions. |
-| **Semantic Caching** | Planned | Redis-backed caching for exact and semantic prompt matches (Week 2). |
-| **Multi-Provider / Failover** | Planned | Fallback routing and circuit breakers across diverse model providers (Week 2). |
+| **Semantic Caching** | Partial | Exact-match on normalized full message history is live and verified; true semantic similarity matching (cosine scan against stored vectors) is still the open gap in task.md. |
+| **Local Fallback (Ollama)** | Partial | The model is running and independently verified; it is not yet reachable through the circuit breaker or the live request path. |
+| **Circuit Breaker** | Planned | Fallback routing and circuit breakers across diverse model providers (Week 2). |
 | **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
 | **Auth & Rate Limiting** | Planned | API key validation and sliding-window rate limits per application (Week 3). |
 | **Prompt Registry** | Planned | Versioned prompt templates and overrides (Week 4). |

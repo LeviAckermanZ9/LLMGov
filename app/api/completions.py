@@ -10,7 +10,7 @@ import os
 import time
 
 import litellm
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 
 import asyncio
 from app.config.settings import settings
@@ -43,7 +43,7 @@ def _extract_provider(model: str) -> str:
 
 
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResponse:
+async def chat_completions(request: ChatCompletionRequest, background_tasks: BackgroundTasks) -> ChatCompletionResponse:
     """
     Proxies a chat completion request through LiteLLM to the
     configured LLM provider. Returns an OpenAI-compatible response.
@@ -99,7 +99,20 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
     prompt_text = " ".join([m.content for m in request.messages])
     embedding_task = generate_embedding(prompt_text)
     
-    response, vector = await asyncio.gather(completion_task, embedding_task)
+    results = await asyncio.gather(completion_task, embedding_task, return_exceptions=True)
+    
+    if isinstance(results[0], Exception):
+        # If the completion fails, we must bubble it up (500)
+        raise results[0]
+        
+    response = results[0]
+    
+    if isinstance(results[1], Exception):
+        # If the embedding fails, we log it and continue without vector
+        logger.error("Embedding generation failed, vector will not be cached", exc_info=results[1])
+        vector = []
+    else:
+        vector = results[1]
 
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
     provider = _extract_provider(request.model)
@@ -152,15 +165,14 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
     )
 
     # ── Cache Write Path ──
-    # Fire and forget cache update
-    asyncio.create_task(
-        set_cached_completion(
-            prompt_version=prompt_version,
-            model=request.model,
-            prompt_hash=prompt_hash,
-            payload=result.model_dump(),
-            vector=vector
-        )
+    # Fire and forget cache update using FastAPI BackgroundTasks
+    background_tasks.add_task(
+        set_cached_completion,
+        prompt_version=prompt_version,
+        model=request.model,
+        prompt_hash=prompt_hash,
+        payload=result.model_dump(),
+        vector=vector
     )
 
     return result

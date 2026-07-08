@@ -95,24 +95,32 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         max_tokens=request.max_tokens,
     )
     
-    # Embeddings API requires text. Concatenate contents for the embedding.
-    prompt_text = " ".join([m.content for m in request.messages])
-    embedding_task = generate_embedding(prompt_text)
+    # Semantic caching compares the user's explicit question, not the system prompt.
+    # Therefore, we embed only the latest user message to capture the true intent.
+    # Find the last message with role 'user'. If none exists, default to the last message.
+    latest_user_content = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"),
+        request.messages[-1].content if request.messages else ""
+    )
+    embedding_task = generate_embedding(latest_user_content)
     
     results = await asyncio.gather(completion_task, embedding_task, return_exceptions=True)
     
-    if isinstance(results[0], Exception):
+    completion_result = results[0]
+    embedding_result = results[1]
+
+    if isinstance(completion_result, Exception):
         # If the completion fails, we must bubble it up (500)
-        raise results[0]
+        raise completion_result
         
-    response = results[0]
+    response = completion_result
     
-    if isinstance(results[1], Exception):
+    if isinstance(embedding_result, Exception):
         # If the embedding fails, we log it and continue without vector
-        logger.error("Embedding generation failed, vector will not be cached", exc_info=results[1])
-        vector = []
+        logger.error("Embedding generation failed, vector will not be cached", exc_info=embedding_result)
+        vector: list[float] = []
     else:
-        vector = results[1]
+        vector = embedding_result
 
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
     provider = _extract_provider(request.model)

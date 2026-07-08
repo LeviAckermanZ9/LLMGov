@@ -102,6 +102,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         (m.content for m in reversed(request.messages) if m.role == "user"),
         request.messages[-1].content if request.messages else ""
     )
+    logger.info(f"Extracted embedding input: {latest_user_content}")
     embedding_task = generate_embedding(latest_user_content)
     
     results = await asyncio.gather(completion_task, embedding_task, return_exceptions=True)
@@ -116,8 +117,8 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     import typing
     response = typing.cast(litellm.ModelResponse, completion_result)
     
-    if isinstance(embedding_result, Exception):
-        # If the embedding fails, we log it and continue without vector
+    if isinstance(embedding_result, BaseException):
+        # If the embedding fails (including CancelledError), we log it and continue without vector
         logger.error("Embedding generation failed, vector will not be cached", exc_info=embedding_result)
         vector: list[float] = []
     else:
@@ -127,6 +128,8 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     provider = _extract_provider(request.model)
 
     # ── Map LiteLLM response → our Pydantic model ──
+    usage_obj = getattr(response, "usage", None)
+    
     result = ChatCompletionResponse(
         id=response.id or f"llmgov-{trace_id}",
         created=response.created or int(time.time()),
@@ -143,9 +146,9 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
             for c in response.choices
         ],
         usage=UsageInfo(
-            prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
-            completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
-            total_tokens=getattr(response.usage, "total_tokens", 0) or 0,
+            prompt_tokens=getattr(usage_obj, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage_obj, "completion_tokens", 0) or 0,
+            total_tokens=getattr(usage_obj, "total_tokens", 0) or 0,
         ),
         trace_id=trace_id,
     )

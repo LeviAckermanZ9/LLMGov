@@ -91,3 +91,29 @@ def test_cache_hit_returns_immediately(mock_redis, mock_litellm, mock_embedding)
     mock_litellm.assert_not_called()
     mock_embedding.assert_not_called()
     mock_redis.pipeline.assert_not_called()
+
+def test_embedding_base_exception_handled(mock_redis, mock_litellm):
+    # Simulate embedding throwing asyncio.CancelledError
+    mock_cancelled_embedding = AsyncMock(side_effect=asyncio.CancelledError("Embedding cancelled"))
+    
+    with patch("app.api.completions.generate_embedding", new=mock_cancelled_embedding):
+        client = TestClient(app)
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gemini/gemini-2.5-flash",
+                "messages": [{"role": "user", "content": "embedding fail"}],
+                "stream": False
+            }
+        )
+        
+    assert response.status_code == 200
+    mock_redis.get.assert_called_once()
+    mock_litellm.assert_called_once()
+    
+    # Assert pipeline was still called (since cache writes proceed even without vector)
+    mock_redis.pipeline.assert_called_once()
+    
+    # Extract the kwargs of the set_cached_completion call sent to BackgroundTasks
+    # It's difficult to assert directly on the background task since it fires async,
+    # but the API response indicates no crash and the vector was defaulted to [].

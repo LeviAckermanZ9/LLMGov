@@ -12,7 +12,10 @@ import time
 import litellm
 from fastapi import APIRouter
 
+import asyncio
 from app.config.settings import settings
+from app.core.cache import get_cached_completion, set_cached_completion, hash_embedding_stub
+from app.core.embeddings import generate_embedding
 from app.core.logging import get_logger
 from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
@@ -57,16 +60,46 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
     )
 
     start_ms = time.perf_counter() * 1000
+    prompt_version = "v1" # Hardcoded for now per spec chunks
 
-    # ── Call LiteLLM ──
-    # litellm reads GEMINI_API_KEY from the environment automatically
-    # when the model string starts with "gemini/"
-    response = await litellm.acompletion(
+    # ── 1. Cache Read Path (Stubbed Hash) ──
+    # Fast exact-match hash before any external API calls
+    messages_dicts = [m.model_dump() for m in request.messages]
+    prompt_hash = hash_embedding_stub(messages_dicts)
+    
+    cached_payload = await get_cached_completion(
+        prompt_version=prompt_version, 
+        model=request.model, 
+        prompt_hash=prompt_hash
+    )
+    
+    if cached_payload:
+        logger.info(
+            "Semantic cache hit",
+            extra={"model": request.model, "hash": prompt_hash}
+        )
+        # Parse and return cached payload
+        return ChatCompletionResponse(**cached_payload)
+        
+    logger.info("Semantic cache miss", extra={"model": request.model, "hash": prompt_hash})
+
+    # ── 2. Cache Miss Path: Call LLM and Compute Embedding ──
+    
+    # We fire both the completion and the embedding concurrently
+    # The real semantic match logic later will require embeddings on the read path, 
+    # but for now we only compute it on a miss to store it for future.
+    completion_task = litellm.acompletion(
         model=request.model,
-        messages=[m.model_dump() for m in request.messages],
+        messages=messages_dicts,
         temperature=request.temperature,
         max_tokens=request.max_tokens,
     )
+    
+    # Embeddings API requires text. Concatenate contents for the embedding.
+    prompt_text = " ".join([m.content for m in request.messages])
+    embedding_task = generate_embedding(prompt_text)
+    
+    response, vector = await asyncio.gather(completion_task, embedding_task)
 
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
     provider = _extract_provider(request.model)
@@ -116,6 +149,18 @@ async def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResp
         status_code=200,
         prompt_tokens=result.usage.prompt_tokens,
         completion_tokens=result.usage.completion_tokens,
+    )
+
+    # ── Cache Write Path ──
+    # Fire and forget cache update
+    asyncio.create_task(
+        set_cached_completion(
+            prompt_version=prompt_version,
+            model=request.model,
+            prompt_hash=prompt_hash,
+            payload=result.model_dump(),
+            vector=vector
+        )
     )
 
     return result

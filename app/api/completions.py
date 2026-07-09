@@ -107,10 +107,13 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
             )
             primary_breaker.record_success()
         except Exception as e:
-            if isinstance(e, (Timeout, APIError, RateLimitError, ServiceUnavailableError)):
+            if isinstance(e, (Timeout, APIError, RateLimitError, ServiceUnavailableError, litellm.exceptions.NotFoundError)):
                 primary_breaker.record_failure()
-            logger.warning(f"Primary provider failed: {str(e)}. Falling back to Ollama.", extra={"trace_id": trace_id})
-            fallback_used = True
+                logger.warning(f"Primary provider failed: {str(e)}. Falling back to Ollama.", extra={"trace_id": trace_id})
+                fallback_used = True
+            else:
+                logger.error(f"Unexpected error in primary call: {str(e)}")
+                raise e
     else:
         logger.warning("Circuit breaker OPEN. Routing directly to Ollama fallback.", extra={"trace_id": trace_id})
         fallback_used = True

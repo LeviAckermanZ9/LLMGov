@@ -15,7 +15,9 @@ from fastapi import APIRouter, BackgroundTasks
 import asyncio
 from app.config.settings import settings
 from app.core.cache import get_cached_completion, set_cached_completion, hash_embedding_stub
+from app.core.circuit_breaker import CircuitBreaker
 from app.core.embeddings import generate_embedding
+from litellm.exceptions import Timeout, APIError, RateLimitError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
@@ -36,6 +38,7 @@ if settings.gemini_api_key:
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1", tags=["completions"])
 
+primary_breaker = CircuitBreaker()
 
 def _extract_provider(model: str) -> str:
     """Extract provider name from litellm model string (e.g. 'gemini/gemini-2.5-flash' → 'gemini')."""
@@ -84,48 +87,55 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     logger.info("Semantic cache miss", extra={"model": request.model, "hash": prompt_hash})
 
     # ── 2. Cache Miss Path: Call LLM and Compute Embedding ──
-    
-    # We fire both the completion and the embedding concurrently
-    # The real semantic match logic later will require embeddings on the read path, 
-    # but for now we only compute it on a miss to store it for future.
-    completion_task = litellm.acompletion(
-        model=request.model,
-        messages=messages_dicts,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-    )
-    
-    # Semantic caching compares the user's explicit question, not the system prompt.
-    # Therefore, we embed only the latest user message to capture the true intent.
-    # Find the last message with role 'user'. If none exists, default to the last message.
     latest_user_content = next(
         (m.content for m in reversed(request.messages) if m.role == "user"),
         request.messages[-1].content if request.messages else ""
     )
     logger.info(f"Extracted embedding input: {latest_user_content}")
-    embedding_task = generate_embedding(latest_user_content)
+    embedding_task = asyncio.create_task(generate_embedding(latest_user_content))
     
-    results = await asyncio.gather(completion_task, embedding_task, return_exceptions=True)
-    
-    completion_result = results[0]
-    embedding_result = results[1]
+    fallback_used = False
+    completion_result = None
 
-    if isinstance(completion_result, Exception):
-        # If the completion fails, we must bubble it up (500)
-        raise completion_result
-        
+    if primary_breaker.allow_request():
+        try:
+            completion_result = await litellm.acompletion(
+                model=request.model,
+                messages=messages_dicts,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+            primary_breaker.record_success()
+        except Exception as e:
+            if isinstance(e, (Timeout, APIError, RateLimitError, ServiceUnavailableError)):
+                primary_breaker.record_failure()
+            logger.warning(f"Primary provider failed: {str(e)}. Falling back to Ollama.", extra={"trace_id": trace_id})
+            fallback_used = True
+    else:
+        logger.warning("Circuit breaker OPEN. Routing directly to Ollama fallback.", extra={"trace_id": trace_id})
+        fallback_used = True
+
+    if fallback_used:
+        completion_result = await litellm.acompletion(
+            model="ollama/qwen2.5:0.5b",
+            api_base="http://ollama:11434",
+            messages=messages_dicts,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+        )
+
     import typing
     response = typing.cast(litellm.ModelResponse, completion_result)
-    
-    if isinstance(embedding_result, BaseException):
+
+    try:
+        vector = await embedding_task
+    except BaseException as embedding_result:
         # If the embedding fails (including CancelledError), we log it and continue without vector
         logger.error("Embedding generation failed, vector will not be cached", exc_info=embedding_result)
-        vector: list[float] = []
-    else:
-        vector = embedding_result
+        vector = []
 
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
-    provider = _extract_provider(request.model)
+    provider = "ollama" if fallback_used else _extract_provider(request.model)
 
     # ── Map LiteLLM response → our Pydantic model ──
     usage_obj = getattr(response, "usage", None)
@@ -177,15 +187,19 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     )
 
     # ── Cache Write Path ──
-    # Fire and forget cache update using FastAPI BackgroundTasks
-    background_tasks.add_task(
-        set_cached_completion,
-        prompt_version=prompt_version,
-        model=request.model,
-        prompt_hash=prompt_hash,
-        payload=result.model_dump(),
-        vector=vector
-    )
+    # Skip cache write entirely for fallback responses. 
+    # Fallback models are degraded by nature; we don't want to serve
+    # their outputs long after the primary provider has recovered.
+    if not fallback_used:
+        # Fire and forget cache update using FastAPI BackgroundTasks
+        background_tasks.add_task(
+            set_cached_completion,
+            prompt_version=prompt_version,
+            model=request.model,
+            prompt_hash=prompt_hash,
+            payload=result.model_dump(),
+            vector=vector
+        )
 
     return result
 

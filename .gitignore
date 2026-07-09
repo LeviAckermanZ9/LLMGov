@@ -49,3 +49,9 @@ logs/
 # OS
 *.bak
 *.tmp
+
+# Temporary files & Scratchpads
+docs_extracted*.txt
+spec.txt
+scratch*.py
+tests/scratch*.py

@@ -1,3 +1,4 @@
+# MANUAL TEST SCRIPT: Requires live Gemini/Ollama/Redis containers. Not for CI/pytest.
 import urllib.request
 import json
 import time

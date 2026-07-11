@@ -44,15 +44,16 @@ rather than anticipating them.
 
 ---
 
-## Open: HALF_OPEN Does Not Limit Concurrent Probes
+## Fixed: HALF_OPEN Now Limits Concurrent Probes
 
-**Status:** Scheduled for fix in the current review pass (Chunk 1).
+**Status:** Fixed in review pass (Chunk 1). Commit [W2-Review-C1].
 
-When the breaker transitions to `HALF_OPEN`, `allow_request()` returns `True`
-for every caller. Multiple simultaneous requests during recovery testing would
-all be let through to the primary provider instead of limiting to a single
-in-flight probe. The fix is to gate HALF_OPEN to one probe at a time;
-additional concurrent requests route to the fallback until the probe resolves.
+When the breaker transitions to `HALF_OPEN`, `allow_request()` now returns
+`True` only for the first caller and sets a `_half_open_probe_in_flight` flag.
+Subsequent callers get `False` and route to the fallback until the probe
+completes. The flag is reset by `record_success()`, `record_failure()`, and
+by `release_half_open_probe()` (called from a `finally` block in the request
+path as a safety net against unexpected exceptions).
 
 ---
 

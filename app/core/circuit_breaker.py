@@ -18,6 +18,7 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self.failure_count = 0
         self.last_failure_time: float = 0.0
+        self._half_open_probe_in_flight: bool = False
 
     def allow_request(self) -> bool:
         if self.state == CircuitBreakerState.CLOSED:
@@ -27,10 +28,15 @@ class CircuitBreaker:
             # Check if recovery timeout has elapsed using monotonic time
             if time.monotonic() - self.last_failure_time >= self.recovery_timeout:
                 self.state = CircuitBreakerState.HALF_OPEN
+                self._half_open_probe_in_flight = True
                 return True
             return False
 
         if self.state == CircuitBreakerState.HALF_OPEN:
+            if self._half_open_probe_in_flight:
+                # A probe is already in-flight — route this request to fallback
+                return False
+            self._half_open_probe_in_flight = True
             return True
             
         return False
@@ -38,6 +44,7 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         if self.state == CircuitBreakerState.HALF_OPEN:
             # Any failure during half-open immediately trips the breaker again
+            self._half_open_probe_in_flight = False
             self.state = CircuitBreakerState.OPEN
             self.last_failure_time = time.monotonic()
             return
@@ -50,7 +57,20 @@ class CircuitBreaker:
 
     def record_success(self) -> None:
         if self.state == CircuitBreakerState.HALF_OPEN:
+            self._half_open_probe_in_flight = False
             self.state = CircuitBreakerState.CLOSED
         
         if self.state == CircuitBreakerState.CLOSED:
             self.failure_count = 0
+
+    def release_half_open_probe(self) -> None:
+        """Safety net: reset the probe-in-flight flag without changing breaker state.
+
+        Called from a finally block in the request path so that an unexpected
+        exception (one not caught by record_failure) can't permanently lock
+        the breaker into rejecting all HALF_OPEN probes.
+
+        Idempotent — safe to call even if record_success/record_failure
+        already reset the flag.
+        """
+        self._half_open_probe_in_flight = False

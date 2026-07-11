@@ -114,6 +114,8 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
             else:
                 logger.error(f"Unexpected error in primary call: {str(e)}")
                 raise e
+        finally:
+            primary_breaker.release_half_open_probe()
     else:
         logger.warning("Circuit breaker OPEN. Routing directly to Ollama fallback.", extra={"trace_id": trace_id})
         fallback_used = True

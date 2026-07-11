@@ -76,3 +76,66 @@ def test_half_open_failure_retrips_immediately(cb):
         
         # Still open immediately after retrip
         assert cb.allow_request() is False
+
+
+def test_half_open_limits_to_one_probe(cb):
+    """Only the first caller in HALF_OPEN gets through; the second is rejected."""
+    with patch("time.monotonic", return_value=100.0):
+        for _ in range(3):
+            cb.record_failure()
+
+    with patch("time.monotonic", return_value=110.0):
+        first = cb.allow_request()  # Transitions to HALF_OPEN, acquires probe
+        assert first is True
+        assert cb.state == CircuitBreakerState.HALF_OPEN
+        assert cb._half_open_probe_in_flight is True
+
+        second = cb.allow_request()  # Same state, but probe already in-flight
+        assert second is False
+
+
+def test_half_open_probe_flag_resets_after_success(cb):
+    """After a successful probe resets to CLOSED, a new HALF_OPEN allows a fresh probe."""
+    with patch("time.monotonic", return_value=100.0):
+        for _ in range(3):
+            cb.record_failure()
+
+    with patch("time.monotonic", return_value=110.0):
+        cb.allow_request()  # HALF_OPEN, probe acquired
+        cb.record_success()  # CLOSED, flag reset
+        assert cb.state == CircuitBreakerState.CLOSED
+        assert cb._half_open_probe_in_flight is False
+
+    # Trip again and recover to HALF_OPEN
+    with patch("time.monotonic", return_value=200.0):
+        for _ in range(3):
+            cb.record_failure()
+
+    with patch("time.monotonic", return_value=210.0):
+        assert cb.allow_request() is True  # Fresh probe allowed
+        assert cb._half_open_probe_in_flight is True
+
+
+def test_half_open_probe_flag_resets_on_unhandled_exception(cb):
+    """release_half_open_probe() resets the flag even when neither
+    record_success nor record_failure was called (simulating an
+    unexpected exception escaping the primary call)."""
+    with patch("time.monotonic", return_value=100.0):
+        for _ in range(3):
+            cb.record_failure()
+
+    with patch("time.monotonic", return_value=110.0):
+        cb.allow_request()  # HALF_OPEN, probe acquired
+        assert cb._half_open_probe_in_flight is True
+
+        # Simulate: the primary call threw an unexpected exception.
+        # Neither record_success() nor record_failure() was called.
+        # The finally block calls release_half_open_probe().
+        cb.release_half_open_probe()
+        assert cb._half_open_probe_in_flight is False
+
+        # The breaker is still HALF_OPEN (state unchanged by release),
+        # and a new probe can be acquired.
+        assert cb.state == CircuitBreakerState.HALF_OPEN
+        assert cb.allow_request() is True
+

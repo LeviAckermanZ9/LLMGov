@@ -10,7 +10,7 @@ Check here before assuming something isn't built yet.
 - [x] C1b: Real concurrency test (asyncio.gather, httpx.AsyncClient)
 - [x] C2: API key consistency — env-var bridge moved to settings.py
 - [x] C3: ADR-003 — Redis startup behavior (fail-fast, Compose healthcheck)
-- [ ] C4: README truth pass + Ollama healthcheck fix + merge-ready
+- [x] C4: README truth pass + Ollama healthcheck fix + merge-ready
 
 ---
 

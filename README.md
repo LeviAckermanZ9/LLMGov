@@ -92,7 +92,7 @@ flowchart TD
 | **Observability (Core)** | Live | Structured JSON logging, `X-Request-ID` correlation (`trace_id`), global error handling. |
 | **Completions API** | Live | Single-provider proxy (`POST /v1/chat/completions`) using Gemini 2.5 Flash via LiteLLM. |
 | **Telemetry (Write-Path)** | Live | Asynchronous writes to ClickHouse `llm_metrics` table upon successful completions. |
-| **Semantic Caching** | Live | Exact-match hash on normalized latest user message is live and verified (with TTLs). True semantic similarity matching (cosine scan) remains Planned. |
+| **Semantic Caching** | Live | Cache key is an exact-match SHA-256 hash of the full normalized message history (all roles, all turns). Embedding vector uses only the latest user message for future semantic similarity. True cosine-similarity matching (threshold scan against stored vectors) remains Planned. |
 | **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
 | **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama failover. |
 | **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
@@ -184,7 +184,12 @@ LLMGov/
 │   ├── config/
 │   │   └── settings.py          # Pydantic settings management
 │   ├── core/
+│   │   ├── cache.py             # Semantic cache read/write (Redis)
+│   │   ├── cache_keys.py        # Cache key builders and TTL policy
+│   │   ├── circuit_breaker.py   # Provider circuit breaker state machine
+│   │   ├── embeddings.py        # Gemini embedding helper (768-dim)
 │   │   ├── logging.py           # Structured JSON logger
+│   │   ├── redis.py             # Redis connection pool lifecycle
 │   │   └── telemetry.py         # Async ClickHouse metric writer
 │   ├── middleware/
 │   │   ├── error_handler.py     # Global exception handlers

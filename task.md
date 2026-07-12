@@ -3,6 +3,15 @@
 This file tracks pieces that are deliberately deferred, not forgotten.
 Check here before assuming something isn't built yet.
 
+## Week 2 Review Pass — Chunk Status
+
+- [x] C0: Create `task.md` in repo root
+- [x] C1: HALF_OPEN concurrent probe limiting + finally-block safety net
+- [x] C1b: Real concurrency test (asyncio.gather, httpx.AsyncClient)
+- [x] C2: API key consistency — env-var bridge moved to settings.py
+- [x] C3: ADR-003 — Redis startup behavior (fail-fast, Compose healthcheck)
+- [ ] C4: README truth pass + Ollama healthcheck fix + merge-ready
+
 ---
 
 ## Deferred: True Semantic Similarity Matching (Spec §5.3)

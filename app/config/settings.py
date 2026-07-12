@@ -5,6 +5,8 @@ Centralized configuration via pydantic-settings.
 All values are overridable through environment variables or a .env file.
 """
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,3 +39,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── Export API keys to os.environ for litellm ──
+# litellm reads keys from os.environ, not Python variables.
+# pydantic-settings loads .env → Python attrs, so we bridge the gap here
+# at module-load time (when settings is first imported), ensuring every
+# module that uses litellm sees the key regardless of import order.
+if settings.gemini_api_key:
+    os.environ.setdefault("GEMINI_API_KEY", settings.gemini_api_key)

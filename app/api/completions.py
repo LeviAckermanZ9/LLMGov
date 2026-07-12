@@ -6,7 +6,6 @@ W1-C3: Gemini (gemini/gemini-2.5-flash) hardcoded as the only
 provider. No cache, no guardrails, no registry — those are later.
 """
 
-import os
 import time
 
 import litellm
@@ -28,12 +27,6 @@ from app.models.completions import (
     ChoiceMessage,
     UsageInfo,
 )
-
-# ── Export API keys to os.environ for litellm ──
-# litellm reads keys from os.environ, not Python variables.
-# pydantic-settings loads .env → Python attrs, so we bridge the gap.
-if settings.gemini_api_key:
-    os.environ.setdefault("GEMINI_API_KEY", settings.gemini_api_key)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1", tags=["completions"])

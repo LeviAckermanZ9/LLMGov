@@ -22,7 +22,6 @@ async def test_generate_embedding_mocked(mock_aembedding):
         model="gemini/gemini-embedding-001",
         input=["hello world"],
         dimensions=768,
-        api_key=mock_aembedding.call_args.kwargs.get("api_key")
     )
 
 @pytest.mark.asyncio

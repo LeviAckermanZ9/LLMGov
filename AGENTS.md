@@ -10,7 +10,7 @@ You are the implementation agent for **LLMGov**, a self-hosted LLM gateway: rout
 
 **The single source of truth is `docs/LLMGov_Master_Specification.docx`** in the repo. It contains the Scope Contract, all seven capability pillars, the exact schemas, and the real deadline calendar. Read it before making any decision this file doesn't cover. If something in this file and the spec ever conflict, the spec wins — flag the conflict instead of guessing.
 
-**`task.md` in the repo root tracks known gaps** — pieces that are deliberately deferred, not forgotten. Check it before assuming something isn't built yet, and add to it any time you defer something rather than build it.
+**`task.md` in the repo root tracks known gaps** — pieces that are deliberately deferred, not forgotten. Check it before assuming something isn't built yet, and add to it any time you defer something rather than build it. **`task.md` also carries a running chunk-status checklist for whatever phase is currently in progress** (`[x]`/`[ ]` per chunk, same format as its original Week 1 version) — update this checklist as part of every chunk's commit, not just at the end of a phase. The goal: a fresh session with zero conversational memory can read `task.md` alone and know exactly what's done, what's open, and what's next — nothing should require reconstructing from chat history.
 
 Do not re-derive the architecture from first principles. It's already decided. Your job is implementation, not redesign.
 
@@ -53,9 +53,11 @@ If applying an instruction literally would leave the project in a worse state th
 
 ## 4. Where things actually stand
 
-Week 1 (gateway skeleton, single-provider completions, telemetry write-path, README) is complete. A Week 2 stretch (Redis connection pool, embedding helper, cache key logic, circuit breaker, ADR-001/002) is also complete — see `task.md` for the specific list of what's deliberately not yet wired together (embedding-to-hash function, the cosine-similarity comparison scan, the circuit breaker's concurrent-probe limiting in `HALF_OPEN`, the p99-latency trigger).
+Week 1 is complete. The original Week 2 stretch (Redis pool, embedding helper, cache keys, circuit breaker as isolated pieces, ADR-001/002) is complete. Full integration — cache wired live, circuit breaker wired with Ollama fallback, telemetry decoupling, and a structurally-proven chaos test — is also complete, on the `week2-integration-draft` branch.
 
-Next phase is an integration review: wiring the isolated Week 2 pieces into the live request path, resolving what's flagged in `task.md`, and the actual end-to-end chaos test (kill the primary provider, confirm fallback serves the response) that the master spec names as Week 2's real exit criterion. Don't assume this section is current by the time you read it — check `task.md` and the latest commit history for the real state before proposing next steps.
+**A review pass on that branch is currently in progress.** `task.md` is the authoritative record of exactly what's done and what's open in this pass — read it fresh, don't assume this paragraph is current by the time you see it. As of this writing, the review pass has resolved `HALF_OPEN` concurrent-probe limiting, but **two verification questions from that same chunk are still explicitly open, not yet answered:** (1) whether the existing cache read/write path already degrades gracefully on a live, mid-request Redis failure or would currently crash the request, and (2) whether the `finally`-block probe-flag release is correctly scoped to only the genuine-probe code path, confirmed with a real concurrent test, not just sequential unit tests. Resolve both before treating that chunk as closed. Remaining queued chunks: API key consistency cleanup, ADR-003 (Redis startup behavior), and a final README truth pass plus Ollama healthcheck fix.
+
+**The actual merge of `week2-integration-draft` into `main` is a manual action taken by Gojo directly on GitHub — not something for you to execute.** `main` is branch-protected (no direct pushes, PR required); a local `git merge` + `git push` to `main` will simply fail, and that's the guardrail working correctly, not a bug to route around. Your job on the merge chunk is to leave the branch fully merge-ready — every chunk committed, the PR's diff accurate, the README honest — and then stop and report that it's ready, rather than attempt the merge yourself.
 
 ---
 
@@ -79,3 +81,15 @@ At the start of each new phase: read the relevant section of the master spec, br
 ## 7. If you're stuck
 
 If the same error survives two different fix attempts, or a chunk clearly won't land, stop and report the blocker plainly — what you tried, what happened, what you think the real problem is. A clear "I'm stuck, here's why" beats three more silent commits that don't fix it.
+
+---
+
+## 8. Driver-Navigator model (which model is driving changes how tightly this applies)
+
+This project is worked by more than one model depending on availability. Claude, in a separate conversation outside Antigravity, acts as navigator — reviewing Implementation Plans and completion reports. How tightly that applies depends on which model is driving:
+
+**If you are Gemini (or any non-Opus model):** the navigator review is mandatory and the gate is tight, specifically for anything touching an already-verified, live code path (`completions.py`, `main.py`, any wired integration). Local, additive, isolated work still follows the normal Section 3 calibration — propose and wait on anything that changes an interface, schema, or scope, same as always. This tightened gate isn't a permanent judgment on capability — it exists because of a documented, real difference in tool-calling reliability inside agentic coding harnesses specifically, separate from reasoning quality. It applies to work, not to you personally, and it lifts the moment a more-trusted model resumes the same work.
+
+**If you are Claude Opus:** you operate in a ping-pong model instead — capable of being both driver and your own navigator, since self-review has generally held up well on this project so far. Mandatory external review is not required for every chunk. That said, external navigation from Claude Sonnet is still available and worth using where it genuinely helps — a second perspective on a real architectural tradeoff (like the Redis startup decision), a case where you're genuinely uncertain, or simply reporting back a completed phase for a fresh set of eyes before a merge. Use it where it fits, not as a formality. Worth being honest about the limits of this too: Opus has also missed an explicit question in a report at least once on this project — the lighter touch is a reflection of track record, not an assumption of infallibility.
+
+**Regardless of which model is driving:** every report needs real, pasted evidence — actual file contents, actual test output, actual command output — not a description of what should be true. This has been the standard for the whole project; it doesn't loosen for either model.

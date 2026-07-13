@@ -15,8 +15,8 @@ A production-grade LLM gateway that unifies routing, semantic caching, safety gu
 
 ## Project Resources
 
-*   **Known Gaps & Active Checklist**: See [task.md](file:///d:/Personal/LLMGov/task.md) in the repository root.
-*   **Architecture Decision Records (ADRs)**: Detailed rationales and designs are documented under [docs/adr/](file:///d:/Personal/LLMGov/docs/adr/).
+*   **Known Gaps & Active Checklist**: See [task.md](task.md) in the repository root.
+*   **Architecture Decision Records (ADRs)**: Detailed rationales and designs are documented under [docs/adr/](docs/adr/).
 
 ## What This Is
 

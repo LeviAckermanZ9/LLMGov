@@ -13,6 +13,11 @@ A production-grade LLM gateway that unifies routing, semantic caching, safety gu
 ![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat&logo=google&logoColor=white)
 ![Ollama](https://img.shields.io/badge/Ollama-Local-white?style=flat&logo=ollama&logoColor=black)
 
+## Project Resources
+
+*   **Known Gaps & Active Checklist**: See [task.md](file:///d:/Personal/LLMGov/task.md) in the repository root.
+*   **Architecture Decision Records (ADRs)**: Detailed rationales and designs are documented under [docs/adr/](file:///d:/Personal/LLMGov/docs/adr/).
+
 ## What This Is
 
 LLMGov provides a centralized control plane for enterprise LLM consumption. Rather than having disparate services manage their own provider API keys, retries, and usage tracking, applications route requests through this gateway. This allows organizations to enforce compliance, audit all LLM interactions, and track costs and latency systematically without modifying downstream client code.
@@ -76,10 +81,10 @@ flowchart TD
 | :--- | :--- |
 | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) **Python / FastAPI** | High-performance asynchronous processing; native integration with Pydantic for strict request/response validation. |
 | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker Compose** | Ensures reproducible environments across dev and prod, isolating dependencies and standardizing deployments. |
-| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, alongside rate limiting counters. |
+| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, powered by a live connection pool initialized at application startup, and prepared for future rate limiting counters. |
 | ![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white) **ClickHouse** | Columnar database designed for massive OLAP workloads; handles high-throughput telemetry writes without blocking the hot path. |
 | ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white) **Pydantic** | Provides robust, type-safe data validation and serialization for API contracts, ensuring strict compliance with expected schemas. |
-| ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized as the primary single-provider integration via LiteLLM to normalize interactions before expanding to multi-provider routing. |
+| ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized via LiteLLM for both completions (Gemini 2.5 Flash) and embeddings (Gemini embedding-001) as part of the primary provider integration, validating multi-modal capabilities and embedding scope policies. |
 | ![Ollama](https://img.shields.io/badge/Ollama-white?style=flat&logo=ollama&logoColor=black) **Ollama (qwen2.5:0.5b)** | Local fallback provider used to prove routing and circuit breaker mechanisms work under strict 4GB VRAM constraints, prioritizing architectural validation over model intelligence. |
 
 ## Current Status
@@ -92,9 +97,9 @@ flowchart TD
 | **Observability (Core)** | Live | Structured JSON logging, `X-Request-ID` correlation (`trace_id`), global error handling. |
 | **Completions API** | Live | Single-provider proxy (`POST /v1/chat/completions`) using Gemini 2.5 Flash via LiteLLM. |
 | **Telemetry (Write-Path)** | Live | Asynchronous writes to ClickHouse `llm_metrics` table upon successful completions. |
-| **Semantic Caching** | Live | Cache key is an exact-match SHA-256 hash of the full normalized message history (all roles, all turns). Embedding vector uses only the latest user message for future semantic similarity. True cosine-similarity matching (threshold scan against stored vectors) remains Planned. |
+| **Semantic Caching** | Live | Exact-match caching is Live: cache key uses a SHA-256 hash of the full normalized message history (all roles, all turns) to guarantee context safety, and embedding generation uses only the latest user message. True cosine-similarity threshold scan against stored vectors remains Planned. |
 | **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
-| **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama failover. |
+| **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama fallback and a robust HALF_OPEN concurrent-probe limit (ensuring only a single probe is in-flight via a non-blocking asyncio race condition check). |
 | **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
 | **Auth & Rate Limiting** | Planned | API key validation and sliding-window rate limits per application (Week 3). |
 | **Prompt Registry** | Planned | Versioned prompt templates and overrides (Week 4). |
@@ -172,7 +177,7 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 
 ## Reliability
 
-Gateway failover is hardened by an automated state-machine chaos test that systematically triggers failures to verify circuit breaker transitions (`CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`), ensuring requests bypass failing primary providers instantly and autonomously return once recovery timeouts elapse.
+Gateway failover is hardened by an automated state-machine chaos test that systematically triggers failures to verify circuit breaker transitions (`CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`), ensuring requests bypass failing primary providers instantly and autonomously return once recovery timeouts elapse. Additionally, a concurrency-safe integration test validates the `HALF_OPEN` state using a real `asyncio.Event`-gated interleaving mechanism, proving that multiple parallel requests are safely throttled to a single primary probe while concurrent traffic gets seamlessly routed to Ollama.
 
 ## Project Structure
 

@@ -65,7 +65,22 @@ services:
       - CLICKHOUSE_PASSWORD=llmgov_dev
     restart: unless-stopped
 
+  # ── Fallback Provider (Ollama) ──
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   redis_data:
   ch_data:
+  ollama_data:
 

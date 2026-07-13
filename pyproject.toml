@@ -45,3 +45,6 @@ asyncio_mode = "auto"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

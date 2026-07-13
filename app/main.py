@@ -23,18 +23,19 @@ from app.middleware.request_id import RequestIDMiddleware
 setup_logging(level=settings.log_level)
 logger = get_logger(__name__)
 
+from app.core.redis import redis_lifespan
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown lifecycle hook."""
-    # ── Startup ──
-    # Connection pools (Redis, ClickHouse) will be initialized here
-    # in later chunks.
     logger.info(
         "LLMGov gateway starting",
         extra={"model": None, "provider": None},
     )
-    yield
+    
+    async with redis_lifespan(app):
+        yield
     # ── Shutdown ──
     logger.info("LLMGov gateway shutting down")
 

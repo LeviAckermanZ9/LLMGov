@@ -11,6 +11,12 @@ A production-grade LLM gateway that unifies routing, semantic caching, safety gu
 ![ClickHouse](https://img.shields.io/badge/ClickHouse-24.3+-FFCC01?style=flat&logo=clickhouse&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat&logo=pydantic&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat&logo=google&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local-white?style=flat&logo=ollama&logoColor=black)
+
+## Project Resources
+
+*   **Known Gaps & Active Checklist**: See [task.md](task.md) in the repository root.
+*   **Architecture Decision Records (ADRs)**: Detailed rationales and designs are documented under [docs/adr/](docs/adr/).
 
 ## What This Is
 
@@ -22,6 +28,7 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 flowchart TD
     %% Define Styles
     classDef built fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
+    classDef partial fill:#fb8c00,stroke:#e65100,stroke-width:4px,color:white;
     classDef planned fill:#eeeeee,stroke:#999999,stroke-width:2px,stroke-dasharray: 5 5,color:#555555;
 
     Client([Client App]) --> Gateway
@@ -34,7 +41,7 @@ flowchart TD
         Ingest --> Auth
         
         subgraph Interceptors [Middleware Checks]
-            Cache[Semantic Cache]:::planned
+            Cache[Semantic Cache]:::built
             Guard[Safety Guardrails]:::planned
             Eval[Auto-Evaluator]:::planned
         end
@@ -48,21 +55,21 @@ flowchart TD
         Registry --> ProviderAbstraction
         
         ProviderAbstraction --> PrimaryProvider
-        ProviderAbstraction -.-> FallbackProvider
+        ProviderAbstraction --> FallbackProvider
         
         Telemetry[Telemetry Async Writer]:::built
         ProviderAbstraction --> Telemetry
     end
     
     PrimaryProvider[Gemini 2.5 Flash]:::built
-    FallbackProvider[Other Providers]:::planned
+    FallbackProvider[Ollama (Local Fallback)]:::built
     
     CH[(ClickHouse\nllm_metrics)]:::built
-    Redis[(Redis\nCache/Limits)]:::planned
+    Redis[(Redis\nCache/Limits)]:::built
     
     Telemetry --> CH
     Auth -.-> Redis
-    Cache -.-> Redis
+    Cache --> Redis
     
     Grafana[Grafana Dashboards]:::planned
     CH -.-> Grafana
@@ -74,12 +81,15 @@ flowchart TD
 | :--- | :--- |
 | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) **Python / FastAPI** | High-performance asynchronous processing; native integration with Pydantic for strict request/response validation. |
 | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker Compose** | Ensures reproducible environments across dev and prod, isolating dependencies and standardizing deployments. |
-| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency in-memory data store, ideal for rate limiting counters and eventual semantic caching layers. |
+| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, powered by a live connection pool initialized at application startup, and prepared for future rate limiting counters. |
 | ![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white) **ClickHouse** | Columnar database designed for massive OLAP workloads; handles high-throughput telemetry writes without blocking the hot path. |
 | ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white) **Pydantic** | Provides robust, type-safe data validation and serialization for API contracts, ensuring strict compliance with expected schemas. |
-| ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized as the primary single-provider integration via LiteLLM to normalize interactions before expanding to multi-provider routing. |
+| ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized via LiteLLM for both completions (Gemini 2.5 Flash) and embeddings (Gemini embedding-001) as part of the primary provider integration, validating multi-modal capabilities and embedding scope policies. |
+| ![Ollama](https://img.shields.io/badge/Ollama-white?style=flat&logo=ollama&logoColor=black) **Ollama (qwen2.5:0.5b)** | Local fallback provider used to prove routing and circuit breaker mechanisms work under strict 4GB VRAM constraints, prioritizing architectural validation over model intelligence. |
 
 ## Current Status
+
+*Note: The project currently uses a three-state system (Live, Partial, Planned) because this branch represents a mid-integration draft. Some components are wired functionally but are missing their final algorithmic implementations or routing connections, which will be finalized before merging to main.*
 
 | Feature | Status | Description |
 | :--- | :--- | :--- |
@@ -87,8 +97,9 @@ flowchart TD
 | **Observability (Core)** | Live | Structured JSON logging, `X-Request-ID` correlation (`trace_id`), global error handling. |
 | **Completions API** | Live | Single-provider proxy (`POST /v1/chat/completions`) using Gemini 2.5 Flash via LiteLLM. |
 | **Telemetry (Write-Path)** | Live | Asynchronous writes to ClickHouse `llm_metrics` table upon successful completions. |
-| **Semantic Caching** | Planned | Redis-backed caching for exact and semantic prompt matches (Week 2). |
-| **Multi-Provider / Failover** | Planned | Fallback routing and circuit breakers across diverse model providers (Week 2). |
+| **Semantic Caching** | Live | Exact-match caching is Live: cache key uses a SHA-256 hash of the full normalized message history (all roles, all turns) to guarantee context safety, and embedding generation uses only the latest user message. True cosine-similarity threshold scan against stored vectors remains Planned. |
+| **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
+| **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama fallback and a robust HALF_OPEN concurrent-probe limit (ensuring only a single probe is in-flight via a non-blocking asyncio race condition check). |
 | **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
 | **Auth & Rate Limiting** | Planned | API key validation and sliding-window rate limits per application (Week 3). |
 | **Prompt Registry** | Planned | Versioned prompt templates and overrides (Week 4). |
@@ -125,7 +136,7 @@ flowchart TD
 
 ## API Example
 
-Here is a real request and response using the `POST /v1/chat/completions` endpoint, which proxies to Gemini and logs telemetry to ClickHouse.
+Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a **semantic cache hit** (returning instantly without querying the primary provider).
 
 **Request:**
 ```bash
@@ -133,8 +144,7 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemini/gemini-2.5-flash",
-    "messages": [{"role": "user", "content": "What is 7*8? Reply with only the number."}],
-    "temperature": 0.0,
+    "messages": [{"role": "user", "content": "hello from cache hit test"}],
     "stream": false
   }'
 ```
@@ -142,28 +152,32 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 **Response:**
 ```json
 {
-  "id": "aIpKauSsOYv8juMP0d_0sAg",
+  "id": "pxRPaueiFYzLjuMP99nI-Q4",
   "object": "chat.completion",
-  "created": 1783269992,
+  "created": 1783567526,
   "model": "gemini-2.5-flash",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "56"
+        "content": "Hello! Excellent! Glad to hear the data retrieval was swift and efficient.\n\nWelcome to the conversation. What can I process for you today with optimal efficiency?"
       },
       "finish_reason": "stop"
     }
   ],
   "usage": {
-    "prompt_tokens": 14,
-    "completion_tokens": 55,
-    "total_tokens": 69
+    "prompt_tokens": 6,
+    "completion_tokens": 980,
+    "total_tokens": 986
   },
-  "trace_id": "5018d93c-44a9-47a5-a39c-bb5a6c9c6734"
+  "trace_id": "5b2afa3a-ab30-4b12-936b-19fb25469181"
 }
 ```
+
+## Reliability
+
+Gateway failover is hardened by an automated state-machine chaos test that systematically triggers failures to verify circuit breaker transitions (`CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`), ensuring requests bypass failing primary providers instantly and autonomously return once recovery timeouts elapse. Additionally, a concurrency-safe integration test validates the `HALF_OPEN` state using a real `asyncio.Event`-gated interleaving mechanism, proving that multiple parallel requests are safely throttled to a single primary probe while concurrent traffic gets seamlessly routed to Ollama.
 
 ## Project Structure
 
@@ -175,7 +189,12 @@ LLMGov/
 │   ├── config/
 │   │   └── settings.py          # Pydantic settings management
 │   ├── core/
+│   │   ├── cache.py             # Semantic cache read/write (Redis)
+│   │   ├── cache_keys.py        # Cache key builders and TTL policy
+│   │   ├── circuit_breaker.py   # Provider circuit breaker state machine
+│   │   ├── embeddings.py        # Gemini embedding helper (768-dim)
 │   │   ├── logging.py           # Structured JSON logger
+│   │   ├── redis.py             # Redis connection pool lifecycle
 │   │   └── telemetry.py         # Async ClickHouse metric writer
 │   ├── middleware/
 │   │   ├── error_handler.py     # Global exception handlers

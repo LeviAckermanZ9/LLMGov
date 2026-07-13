@@ -31,47 +31,47 @@ flowchart TD
     classDef partial fill:#fb8c00,stroke:#e65100,stroke-width:4px,color:white;
     classDef planned fill:#eeeeee,stroke:#999999,stroke-width:2px,stroke-dasharray: 5 5,color:#555555;
 
-    Client([Client App]) --> Gateway
+    Client(["Client App"]) --> Gateway
     
-    subgraph Gateway [LLMGov FastAPI Gateway]
+    subgraph Gateway ["LLMGov FastAPI Gateway"]
         direction TB
-        Ingest[Ingestion & Request ID]:::built
-        Auth[Auth & Rate Limit]:::planned
+        Ingest["Ingestion & Request ID"]:::built
+        Auth["Auth & Rate Limit"]:::planned
         
         Ingest --> Auth
         
-        subgraph Interceptors [Middleware Checks]
-            Cache[Semantic Cache]:::built
-            Guard[Safety Guardrails]:::planned
-            Eval[Auto-Evaluator]:::planned
+        subgraph Interceptors ["Middleware Checks"]
+            Cache["Semantic Cache"]:::built
+            Guard["Safety Guardrails"]:::planned
+            Eval["Auto-Evaluator"]:::planned
         end
         
         Auth --> Interceptors
         
-        Registry[Prompt Registry & Router]:::planned
+        Registry["Prompt Registry & Router"]:::planned
         Interceptors --> Registry
         
-        ProviderAbstraction[Provider Abstraction]:::built
+        ProviderAbstraction["Provider Abstraction"]:::built
         Registry --> ProviderAbstraction
         
         ProviderAbstraction --> PrimaryProvider
         ProviderAbstraction --> FallbackProvider
         
-        Telemetry[Telemetry Async Writer]:::built
+        Telemetry["Telemetry Async Writer"]:::built
         ProviderAbstraction --> Telemetry
     end
     
-    PrimaryProvider[Gemini 2.5 Flash]:::built
-    FallbackProvider[Ollama (Local Fallback)]:::built
+    PrimaryProvider["Gemini 2.5 Flash"]:::built
+    FallbackProvider["Ollama (Local Fallback)"]:::built
     
-    CH[(ClickHouse\nllm_metrics)]:::built
-    Redis[(Redis\nCache/Limits)]:::built
+    CH[("ClickHouse\nllm_metrics")]:::built
+    Redis[("Redis\nCache/Limits")]:::built
     
     Telemetry --> CH
     Auth -.-> Redis
     Cache --> Redis
     
-    Grafana[Grafana Dashboards]:::planned
+    Grafana["Grafana Dashboards"]:::planned
     CH -.-> Grafana
 ```
 

@@ -54,8 +54,8 @@ flowchart TD
         ProviderAbstraction["Provider Abstraction"]:::built
         Registry --> ProviderAbstraction
         
-        ProviderAbstraction --> PrimaryProvider
-        ProviderAbstraction --> FallbackProvider
+        CircuitBreaker["Circuit Breaker"]:::built
+        ProviderAbstraction --> CircuitBreaker
         
         Telemetry["Telemetry Async Writer"]:::built
         ProviderAbstraction --> Telemetry
@@ -67,6 +67,8 @@ flowchart TD
     CH[("ClickHouse\nllm_metrics")]:::built
     Redis[("Redis\nCache/Limits")]:::built
     
+    CircuitBreaker --> PrimaryProvider
+    CircuitBreaker --> FallbackProvider
     Telemetry --> CH
     Auth -.-> Redis
     Cache --> Redis
@@ -89,7 +91,7 @@ flowchart TD
 
 ## Current Status
 
-*Note: The project currently uses a three-state system (Live, Partial, Planned) because this branch represents a mid-integration draft. Some components are wired functionally but are missing their final algorithmic implementations or routing connections, which will be finalized before merging to main.*
+*Note: The project status tracks which core gateway pillars are fully Live versus Planned for upcoming milestones.*
 
 | Feature | Status | Description |
 | :--- | :--- | :--- |
@@ -136,7 +138,7 @@ flowchart TD
 
 ## API Example
 
-Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a **semantic cache hit** (returning instantly without querying the primary provider).
+Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a successful proxy through the gateway.
 
 **Request:**
 ```bash
@@ -144,7 +146,7 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemini/gemini-2.5-flash",
-    "messages": [{"role": "user", "content": "hello from cache hit test"}],
+    "messages": [{"role": "user", "content": "Why is the sky blue? Answer in one short sentence."}],
     "stream": false
   }'
 ```
@@ -152,26 +154,26 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 **Response:**
 ```json
 {
-  "id": "pxRPaueiFYzLjuMP99nI-Q4",
+  "id": "69FUao_dK77djuMP6Ky2qAM",
   "object": "chat.completion",
-  "created": 1783567526,
+  "created": 1783943658,
   "model": "gemini-2.5-flash",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "Hello! Excellent! Glad to hear the data retrieval was swift and efficient.\n\nWelcome to the conversation. What can I process for you today with optimal efficiency?"
+        "content": "The atmosphere scatters blue sunlight more than other colors."
       },
       "finish_reason": "stop"
     }
   ],
   "usage": {
-    "prompt_tokens": 6,
-    "completion_tokens": 980,
-    "total_tokens": 986
+    "prompt_tokens": 13,
+    "completion_tokens": 798,
+    "total_tokens": 811
   },
-  "trace_id": "5b2afa3a-ab30-4b12-936b-19fb25469181"
+  "trace_id": "0ba5829a-aaa7-4f2e-812d-405a81d04aa8"
 }
 ```
 

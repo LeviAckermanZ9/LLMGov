@@ -12,6 +12,22 @@ Check here before assuming something isn't built yet.
 - [x] C3: ADR-003 — Redis startup behavior (fail-fast, Compose healthcheck)
 - [x] C4: README truth pass + Ollama healthcheck fix + merge-ready
 
+## Week 3: Auth & Rate Limiting — Chunk Status
+
+- [/] C1: Build auth-check and rate-limiter as isolated, unwired modules
+
+---
+
+## Spec Terminology Correction: Rate Limiter Pattern
+
+**Status:** Accepted limitation.
+
+The master specification (§5.1) refers to a "token-bucket counter via INCR + EXPIRE" for rate limiting. However, the specified keyspace layout:
+`llmgov:ratelimit:[app_id]:[window_start]`
+implements a **Fixed Window** counter rate limiter, not a token bucket.
+
+A Fixed Window counter (implemented via `INCR` + `EXPIRE` on a window-based key) has a known boundary-burst limitation: a client can send up to the limit at the end of window $N$ and another limit's worth of requests at the start of window $N+1$, effectively doubling the burst rate across the window boundary. This is an accepted design constraint for the current stage of the LLMGov project. True token-bucket or sliding-window log limiters are deferred to a later optimization phase.
+
 ---
 
 ## Deferred: True Semantic Similarity Matching (Spec §5.3)

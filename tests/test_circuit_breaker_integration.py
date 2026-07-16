@@ -58,6 +58,8 @@ def test_circuit_breaker_fallback_on_failure(mock_redis, mock_embedding, auth_he
         else:
             raise ValueError(f"Unexpected model: {kwargs.get('model')}")
 
+    import uuid
+    unique_content = f"hello {uuid.uuid4()}"
     with patch("app.api.completions.litellm.acompletion", new_callable=AsyncMock, side_effect=mock_acompletion) as mock_llm:
         with TestClient(app) as client:
             response = client.post(
@@ -65,7 +67,7 @@ def test_circuit_breaker_fallback_on_failure(mock_redis, mock_embedding, auth_he
                 headers=auth_headers,
                 json={
                     "model": "gemini/gemini-2.5-flash",
-                    "messages": [{"role": "user", "content": "hello"}],
+                    "messages": [{"role": "user", "content": unique_content}],
                     "stream": False
                 }
             )
@@ -101,6 +103,8 @@ def test_circuit_breaker_open_skips_primary(mock_redis, mock_embedding, auth_hea
     mock_response.usage.completion_tokens = 20
     mock_response.usage.total_tokens = 30
 
+    import uuid
+    unique_content = f"hello {uuid.uuid4()}"
     with patch("app.api.completions.litellm.acompletion", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
         with TestClient(app) as client:
             response = client.post(
@@ -108,7 +112,7 @@ def test_circuit_breaker_open_skips_primary(mock_redis, mock_embedding, auth_hea
                 headers=auth_headers,
                 json={
                     "model": "gemini/gemini-2.5-flash",
-                    "messages": [{"role": "user", "content": "hello"}],
+                    "messages": [{"role": "user", "content": unique_content}],
                     "stream": False
                 }
             )
@@ -179,9 +183,11 @@ async def test_half_open_concurrent_requests_only_one_probes(reset_breaker, auth
                     from app.core.redis import redis_lifespan
                     async with redis_lifespan(app), AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
 
+                        import uuid
+                        unique_content = f"concurrent half-open test {uuid.uuid4()}"
                         payload = {
                             "model": "gemini/gemini-2.5-flash",
-                            "messages": [{"role": "user", "content": "concurrent half-open test"}],
+                            "messages": [{"role": "user", "content": unique_content}],
                             "stream": False
                         }
 

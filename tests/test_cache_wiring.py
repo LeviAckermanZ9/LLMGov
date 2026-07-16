@@ -41,13 +41,15 @@ def mock_embedding():
         yield p
 
 def test_cache_miss_writes_to_redis(mock_redis, mock_litellm, mock_embedding, auth_headers):
+    import uuid
+    unique_content = f"hello cache miss {uuid.uuid4()}"
     with TestClient(app) as client:
         response = client.post(
             "/v1/chat/completions",
             headers=auth_headers,
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hello cache miss"}],
+                "messages": [{"role": "user", "content": unique_content}],
                 "stream": False
             }
         )
@@ -97,6 +99,8 @@ def test_cache_hit_returns_immediately(mock_redis, mock_litellm, mock_embedding,
 def test_embedding_base_exception_handled(mock_redis, mock_litellm, auth_headers):
     # Simulate embedding throwing asyncio.CancelledError
     mock_cancelled_embedding = AsyncMock(side_effect=asyncio.CancelledError("Embedding cancelled"))
+    import uuid
+    unique_content = f"embedding fail {uuid.uuid4()}"
     
     with patch("app.api.completions.generate_embedding", new=mock_cancelled_embedding):
         with TestClient(app) as client:
@@ -105,7 +109,7 @@ def test_embedding_base_exception_handled(mock_redis, mock_litellm, auth_headers
                 headers=auth_headers,
                 json={
                     "model": "gemini/gemini-2.5-flash",
-                    "messages": [{"role": "user", "content": "embedding fail"}],
+                    "messages": [{"role": "user", "content": unique_content}],
                     "stream": False
                 }
             )

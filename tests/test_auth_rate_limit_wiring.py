@@ -54,13 +54,15 @@ async def test_wiring_success_valid_key(mock_litellm, mock_embedding, mock_telem
          patch("app.api.completions.check_rate_limit", AsyncMock(return_value=True)) as mock_limit, \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer llmgov_sk_valid_key"},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 200
@@ -76,13 +78,15 @@ async def test_wiring_invalid_key(mock_litellm, mock_embedding, mock_telemetry, 
     with patch("app.api.completions.authenticate_api_key", AsyncMock(side_effect=InvalidAPIKeyError("Invalid API key"))), \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer llmgov_sk_invalid_key"},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 401
@@ -96,13 +100,15 @@ async def test_wiring_missing_key(mock_litellm, mock_embedding, mock_telemetry, 
     with patch("app.api.completions.authenticate_api_key", AsyncMock(side_effect=InvalidAPIKeyError("API key cannot be empty"))), \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 401
@@ -115,13 +121,15 @@ async def test_wiring_auth_redis_unavailable(mock_litellm, mock_embedding, mock_
     with patch("app.api.completions.authenticate_api_key", AsyncMock(side_effect=AuthServiceUnavailableError("Redis error"))), \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer llmgov_sk_any_key"},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 503
@@ -136,13 +144,15 @@ async def test_wiring_rate_limit_exceeded(mock_litellm, mock_embedding, mock_tel
          patch("app.api.completions.check_rate_limit", AsyncMock(return_value=False)), \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer llmgov_sk_valid_key"},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 429
@@ -157,13 +167,15 @@ async def test_wiring_rate_limit_redis_unavailable_fails_open(mock_litellm, mock
          patch("app.api.completions.check_rate_limit", AsyncMock(side_effect=RateLimiterUnavailableError("Redis error"))), \
          patch("app.core.cache.get_redis", return_value=mock_redis_client):
          
+        import uuid
+        unique_content = f"hi {uuid.uuid4()}"
         client = TestClient(app)
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer llmgov_sk_valid_key"},
             json={
                 "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hi"}]
+                "messages": [{"role": "user", "content": unique_content}]
             }
         )
         assert response.status_code == 200

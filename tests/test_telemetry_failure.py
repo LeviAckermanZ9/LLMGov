@@ -27,13 +27,15 @@ async def test_telemetry_write_failure_does_not_break_response(caplog, auth_head
     with patch("app.api.completions.litellm.acompletion", return_value=mock_response), \
          patch("app.core.telemetry._get_client", return_value=mock_ch_client):
         
+        import uuid
+        unique_content = f"hello telemetry write failure unique content {uuid.uuid4()}"
         with TestClient(app) as client:
             response = client.post(
                 "/v1/chat/completions",
                 headers=auth_headers,
                 json={
                     "model": "gemini/gemini-2.5-flash",
-                    "messages": [{"role": "user", "content": "hello telemetry write failure unique content"}],
+                    "messages": [{"role": "user", "content": unique_content}],
                     "stream": False
                 }
             )

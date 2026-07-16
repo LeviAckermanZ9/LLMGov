@@ -3,10 +3,8 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 
-client = TestClient(app)
-
 @pytest.mark.asyncio
-async def test_telemetry_write_failure_does_not_break_response(caplog):
+async def test_telemetry_write_failure_does_not_break_response(caplog, auth_headers):
     # Setup mock litellm response
     mock_response = MagicMock()
     mock_response.id = "mock-id"
@@ -29,14 +27,19 @@ async def test_telemetry_write_failure_does_not_break_response(caplog):
     with patch("app.api.completions.litellm.acompletion", return_value=mock_response), \
          patch("app.core.telemetry._get_client", return_value=mock_ch_client):
         
-        response = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hello"}],
-                "stream": False
-            }
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                headers=auth_headers,
+                json={
+                    "model": "gemini/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": "hello telemetry write failure unique content"}],
+                    "stream": False
+                }
+            )
+
+
+
 
         # 1. Assert response is still 200 OK
         assert response.status_code == 200

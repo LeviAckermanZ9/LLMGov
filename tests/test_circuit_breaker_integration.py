@@ -34,9 +34,7 @@ def mock_telemetry():
     with patch("app.api.completions.write_metrics") as p:
         yield p
 
-def test_circuit_breaker_fallback_on_failure(mock_redis, mock_embedding):
-    client = TestClient(app)
-    
+def test_circuit_breaker_fallback_on_failure(mock_redis, mock_embedding, auth_headers):
     # Mock litellm to fail on the first call (primary) and succeed on the second (fallback)
     mock_response = MagicMock()
     mock_response.id = "fallback-id"
@@ -61,29 +59,29 @@ def test_circuit_breaker_fallback_on_failure(mock_redis, mock_embedding):
             raise ValueError(f"Unexpected model: {kwargs.get('model')}")
 
     with patch("app.api.completions.litellm.acompletion", new_callable=AsyncMock, side_effect=mock_acompletion) as mock_llm:
-        response = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hello"}],
-                "stream": False
-            }
-        )
-        
-        assert response.status_code == 200
-        assert response.json()["choices"][0]["message"]["content"] == "fallback content"
-        assert completions_module.primary_breaker.failure_count == 1
-        
-        # Verify that acompletion was called twice: once for primary, once for fallback
-        assert mock_llm.call_count == 2
-        calls = mock_llm.call_args_list
-        assert calls[0].kwargs["model"] == "gemini/gemini-2.5-flash"
-        assert calls[1].kwargs["model"] == "ollama/qwen2.5:0.5b"
-        assert calls[1].kwargs["api_base"] == "http://ollama:11434"
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                headers=auth_headers,
+                json={
+                    "model": "gemini/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False
+                }
+            )
+            
+            assert response.status_code == 200
+            assert response.json()["choices"][0]["message"]["content"] == "fallback content"
+            assert completions_module.primary_breaker.failure_count == 1
+            
+            # Verify that acompletion was called twice: once for primary, once for fallback
+            assert mock_llm.call_count == 2
+            calls = mock_llm.call_args_list
+            assert calls[0].kwargs["model"] == "gemini/gemini-2.5-flash"
+            assert calls[1].kwargs["model"] == "ollama/qwen2.5:0.5b"
+            assert calls[1].kwargs["api_base"] == "http://ollama:11434"
 
-def test_circuit_breaker_open_skips_primary(mock_redis, mock_embedding):
-    client = TestClient(app)
-    
+def test_circuit_breaker_open_skips_primary(mock_redis, mock_embedding, auth_headers):
     # Trip the breaker manually and recently
     import time
     completions_module.primary_breaker.state = CircuitBreakerState.OPEN
@@ -104,21 +102,24 @@ def test_circuit_breaker_open_skips_primary(mock_redis, mock_embedding):
     mock_response.usage.total_tokens = 30
 
     with patch("app.api.completions.litellm.acompletion", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-        response = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "gemini/gemini-2.5-flash",
-                "messages": [{"role": "user", "content": "hello"}],
-                "stream": False
-            }
-        )
-        
-        assert response.status_code == 200
-        assert response.json()["choices"][0]["message"]["content"] == "fallback content"
-        
-        # Verify that acompletion was called exactly once, directly for fallback
-        assert mock_llm.call_count == 1
-        assert mock_llm.call_args_list[0].kwargs["model"] == "ollama/qwen2.5:0.5b"
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                headers=auth_headers,
+                json={
+                    "model": "gemini/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False
+                }
+            )
+            
+            assert response.status_code == 200
+            assert response.json()["choices"][0]["message"]["content"] == "fallback content"
+            
+            # Verify that acompletion was called exactly once, directly for fallback
+            assert mock_llm.call_count == 1
+            assert mock_llm.call_args_list[0].kwargs["model"] == "ollama/qwen2.5:0.5b"
+
 
 
 def _make_mock_response(model_name: str) -> MagicMock:
@@ -140,7 +141,7 @@ def _make_mock_response(model_name: str) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_half_open_concurrent_requests_only_one_probes(reset_breaker):
+async def test_half_open_concurrent_requests_only_one_probes(reset_breaker, auth_headers):
     """Two requests via asyncio.gather while HALF_OPEN: first gets the probe,
     second is rejected and routed to fallback. The probe flag survives until
     the first request genuinely completes — not reset prematurely."""
@@ -175,8 +176,9 @@ async def test_half_open_concurrent_requests_only_one_probes(reset_breaker):
 
             with patch("app.api.completions.generate_embedding", return_value=[0.1]):
                 with patch("app.api.completions.write_metrics"):
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    from app.core.redis import redis_lifespan
+                    async with redis_lifespan(app), AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
                         payload = {
                             "model": "gemini/gemini-2.5-flash",
                             "messages": [{"role": "user", "content": "concurrent half-open test"}],
@@ -184,16 +186,16 @@ async def test_half_open_concurrent_requests_only_one_probes(reset_breaker):
                         }
 
                         # Fire request 1 (the probe)
-                        task1 = asyncio.create_task(client.post("/v1/chat/completions", json=payload))
+                        task1 = asyncio.create_task(client.post("/v1/chat/completions", headers=auth_headers, json=payload))
 
                         # Wait until the probe has entered the slow primary mock
                         await asyncio.wait_for(probe_started.wait(), timeout=5.0)
 
                         # At this point: breaker is HALF_OPEN, probe flag is True.
-                        assert completions_module.primary_breaker._half_open_probe_in_flight is True
+                        assert completions_module.primary_breaker._half_open_probe_in_flight
 
                         # Fire request 2 — should be rejected by allow_request()
-                        task2 = asyncio.create_task(client.post("/v1/chat/completions", json=payload))
+                        task2 = asyncio.create_task(client.post("/v1/chat/completions", headers=auth_headers, json=payload))
 
                         # Let task2 reach allow_request() and get routed to fallback.
                         # The fallback mock returns instantly, so task2 will complete.
@@ -201,7 +203,7 @@ async def test_half_open_concurrent_requests_only_one_probes(reset_breaker):
                         await asyncio.sleep(0.05)
 
                         # Probe flag must STILL be True — task2 didn't reset it
-                        assert completions_module.primary_breaker._half_open_probe_in_flight is True
+                        assert completions_module.primary_breaker._half_open_probe_in_flight
 
                         # Now release the probe so task1 can finish
                         probe_release.set()
@@ -209,9 +211,13 @@ async def test_half_open_concurrent_requests_only_one_probes(reset_breaker):
                         resp1, resp2 = await asyncio.gather(task1, task2)
 
     # After both complete, the probe flag should be cleared by the finally block
-    assert completions_module.primary_breaker._half_open_probe_in_flight is False
+    assert not completions_module.primary_breaker._half_open_probe_in_flight
 
     # One response came from the primary probe, one from the fallback
     models = {resp1.json()["model"], resp2.json()["model"]}
     assert "gemini-probe" in models, f"Expected gemini-probe in {models}"
     assert "ollama-fallback" in models, f"Expected ollama-fallback in {models}"
+
+
+
+

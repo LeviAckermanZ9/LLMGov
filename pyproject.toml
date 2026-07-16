@@ -41,6 +41,10 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests (select with '-m integration')",
+    "live_llm: marks tests that require real, live third-party LLM API calls"
+]
 
 [tool.mypy]
 python_version = "3.11"

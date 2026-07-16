@@ -25,7 +25,7 @@ async def test_generate_embedding_mocked(mock_aembedding):
     )
 
 @pytest.mark.asyncio
-@pytest.mark.integration
+@pytest.mark.live_llm
 async def test_generate_embedding_live():
     """
     Live integration test hitting the real Gemini API.

@@ -7,9 +7,14 @@ provider. No cache, no guardrails, no registry — those are later.
 """
 
 import time
+import typing
 
 import litellm
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
+from app.core.auth import authenticate_api_key, InvalidAPIKeyError, AuthServiceUnavailableError
+from app.core.rate_limiter import check_rate_limit, RateLimiterUnavailableError
+
 
 import asyncio
 from app.config.settings import settings
@@ -39,12 +44,76 @@ def _extract_provider(model: str) -> str:
 
 
 @router.post("/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(request: ChatCompletionRequest, background_tasks: BackgroundTasks) -> ChatCompletionResponse:
+async def chat_completions(
+    request: ChatCompletionRequest,
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+) -> typing.Union[ChatCompletionResponse, JSONResponse]:
     """
     Proxies a chat completion request through LiteLLM to the
     configured LLM provider. Returns an OpenAI-compatible response.
     """
     trace_id = get_request_id() or "unknown"
+
+    # ── 0. Authenticate & Check Rate Limits ──
+    # Extract API key from Authorization header or X-API-Key
+    auth_header = http_request.headers.get("Authorization")
+    raw_key = ""
+    if auth_header and auth_header.startswith("Bearer "):
+        raw_key = auth_header[7:]
+    else:
+        raw_key = http_request.headers.get("X-API-Key", "")
+
+    # Auth check
+    try:
+        app_id = await authenticate_api_key(raw_key)
+    except InvalidAPIKeyError as e:
+        logger.warning(f"API key authentication failed: {str(e)}", extra={"trace_id": trace_id})
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "type": "invalid_api_key",
+                    "message": "Unauthorized: Invalid API key",
+                    "trace_id": trace_id
+                }
+            }
+        )
+    except AuthServiceUnavailableError as e:
+        logger.error("Authentication service unavailable due to Redis failure", exc_info=True, extra={"trace_id": trace_id})
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "type": "service_unavailable",
+                    "message": "Service Unavailable: Authentication service is temporarily unavailable",
+                    "trace_id": trace_id
+                }
+            }
+        )
+
+    # Rate limit check (using 60 requests per 60 seconds as default limit)
+    try:
+        allowed = await check_rate_limit(app_id, limit=60, window_seconds=60)
+        if not allowed:
+            logger.warning(f"Rate limit exceeded for app_id: {app_id}", extra={"trace_id": trace_id})
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "type": "rate_limit_exceeded",
+                        "message": "Too Many Requests: Rate limit exceeded",
+                        "trace_id": trace_id
+                    }
+                }
+            )
+    except RateLimiterUnavailableError as e:
+        # Fails open: log loudly, but proceed with request
+        logger.error(
+            f"Rate limiter service unavailable for app_id: {app_id}. Failing open.",
+            exc_info=True,
+            extra={"trace_id": trace_id}
+        )
 
     if request.stream:
         # Streaming will be wired in a later chunk
@@ -52,7 +121,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
 
     logger.info(
         "Completion request received",
-        extra={"model": request.model, "app_id": "default"},
+        extra={"model": request.model, "app_id": app_id},
     )
 
     start_ms = time.perf_counter() * 1000
@@ -175,6 +244,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     # Uses the same trace_id from X-Request-ID — no second UUID.
     await write_metrics(
         trace_id=trace_id,
+        app_id=app_id,
         model_requested=request.model,
         model_used=result.model,
         provider=provider,

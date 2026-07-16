@@ -14,7 +14,8 @@ Check here before assuming something isn't built yet.
 
 ## Week 3: Auth & Rate Limiting — Chunk Status
 
-- [/] C1: Build auth-check and rate-limiter as isolated, unwired modules
+- [x] C1: Build auth-check and rate-limiter as isolated, unwired modules
+- [/] C2: Wire auth and rate limiting into the completions request path + ClickHouse update
 
 ---
 

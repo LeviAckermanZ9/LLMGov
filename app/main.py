@@ -28,7 +28,10 @@ from app.core.redis import redis_lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup / shutdown lifecycle hook."""
+    """
+    Startup / shutdown lifecycle hook.
+    Initializes the Redis connection pool for caching, API key authentication, and rate limiting.
+    """
     logger.info(
         "LLMGov gateway starting",
         extra={"model": None, "provider": None},

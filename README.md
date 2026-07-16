@@ -36,7 +36,7 @@ flowchart TD
     subgraph Gateway ["LLMGov FastAPI Gateway"]
         direction TB
         Ingest["Ingestion & Request ID"]:::built
-        Auth["Auth & Rate Limit"]:::planned
+        Auth["Auth & Rate Limit"]:::built
         
         Ingest --> Auth
         
@@ -83,7 +83,7 @@ flowchart TD
 | :--- | :--- |
 | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) **Python / FastAPI** | High-performance asynchronous processing; native integration with Pydantic for strict request/response validation. |
 | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker Compose** | Ensures reproducible environments across dev and prod, isolating dependencies and standardizing deployments. |
-| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, powered by a live connection pool initialized at application startup, and prepared for future rate limiting counters. |
+| ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, powered by a live connection pool initialized at application startup, API key authentication, and rate limiting counters. |
 | ![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white) **ClickHouse** | Columnar database designed for massive OLAP workloads; handles high-throughput telemetry writes without blocking the hot path. |
 | ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white) **Pydantic** | Provides robust, type-safe data validation and serialization for API contracts, ensuring strict compliance with expected schemas. |
 | ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white) **Gemini (LiteLLM)** | Utilized via LiteLLM for both completions (Gemini 2.5 Flash) and embeddings (Gemini embedding-001) as part of the primary provider integration, validating multi-modal capabilities and embedding scope policies. |
@@ -103,7 +103,7 @@ flowchart TD
 | **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
 | **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama fallback and a robust HALF_OPEN concurrent-probe limit (ensuring only a single probe is in-flight via a non-blocking asyncio race condition check). |
 | **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
-| **Auth & Rate Limiting** | Planned | API key validation and sliding-window rate limits per application (Week 3). |
+| **Auth & Rate Limiting** | Live | Fail-closed API key verification (returns 401 on invalid/missing key, 503 on service unavailability) and sliding-window rate limits per application (returns 429 when limits are exceeded, fails open and degrades gracefully on Redis failure), with real `app_id` routed to telemetry. |
 | **Prompt Registry** | Planned | Versioned prompt templates and overrides (Week 4). |
 
 ## Quickstart
@@ -129,7 +129,13 @@ flowchart TD
    docker compose up -d
    ```
 
-4. **Verify Health:**
+4. **Seed a Test API Key:**
+   Because API Key Authentication is now active and fail-closed, you must seed a valid API key in Redis to authenticate requests. You can seed a test key (`llmgov_sk_dev_app`) that maps to the application identifier `dev_app` by running:
+   ```bash
+   docker compose exec redis redis-cli hset llmgov:auth:5329527556114a7930fefa95d192ba0bdf4097fae6191ae468fae0c8b9c73de8 app_id "dev_app"
+   ```
+
+5. **Verify Health:**
    Ensure the gateway is running and responding.
    ```bash
    curl http://127.0.0.1:8000/health
@@ -138,12 +144,13 @@ flowchart TD
 
 ## API Example
 
-Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a successful proxy through the gateway.
+Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a successful proxy through the gateway. Note that a valid API key must be supplied in the `Authorization` header.
 
 **Request:**
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer llmgov_sk_dev_app" \
   -d '{
     "model": "gemini/gemini-2.5-flash",
     "messages": [{"role": "user", "content": "Why is the sky blue? Answer in one short sentence."}],
@@ -180,6 +187,8 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 ## Reliability
 
 Gateway failover is hardened by an automated state-machine chaos test that systematically triggers failures to verify circuit breaker transitions (`CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`), ensuring requests bypass failing primary providers instantly and autonomously return once recovery timeouts elapse. Additionally, a concurrency-safe integration test validates the `HALF_OPEN` state using a real `asyncio.Event`-gated interleaving mechanism, proving that multiple parallel requests are safely throttled to a single primary probe while concurrent traffic gets seamlessly routed to Ollama.
+
+Furthermore, the sliding-window rate limiter employs a fail-open design: if Redis encounters a connection or query error while verifying the rate limit, the error is logged loudly and the request is permitted to proceed, avoiding hard-stops on network degradation.
 
 ## Project Structure
 

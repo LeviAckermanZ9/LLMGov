@@ -25,6 +25,7 @@ from litellm.exceptions import Timeout, APIError, RateLimitError, ServiceUnavail
 from app.core.logging import get_logger
 from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
+from app.core.pii import redact_pii
 from app.models.completions import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -149,9 +150,24 @@ async def chat_completions(
     logger.info("Semantic cache miss", extra={"model": request.model, "hash": prompt_hash})
 
     # ── 2. Cache Miss Path: Call LLM and Compute Embedding ──
+    # Run PII redaction on all messages before they are sent to the model or embedding API
+    redacted_messages_dicts = []
+    has_pii_redacted_any = False
+    for msg in messages_dicts:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            redacted_content, redacted_flag = redact_pii(content)
+            if redacted_flag:
+                has_pii_redacted_any = True
+            msg_copy = dict(msg)
+            msg_copy["content"] = redacted_content
+            redacted_messages_dicts.append(msg_copy)
+        else:
+            redacted_messages_dicts.append(msg)
+
     latest_user_content = next(
-        (m.content for m in reversed(request.messages) if m.role == "user"),
-        request.messages[-1].content if request.messages else ""
+        (m["content"] for m in reversed(redacted_messages_dicts) if m.get("role") == "user"),
+        redacted_messages_dicts[-1]["content"] if redacted_messages_dicts else ""
     )
     logger.info(f"Extracted embedding input: {latest_user_content}")
     embedding_task = asyncio.create_task(generate_embedding(latest_user_content))
@@ -163,7 +179,7 @@ async def chat_completions(
         try:
             completion_result = await litellm.acompletion(
                 model=request.model,
-                messages=messages_dicts,
+                messages=redacted_messages_dicts,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
             )
@@ -186,7 +202,7 @@ async def chat_completions(
         completion_result = await litellm.acompletion(
             model="ollama/qwen2.5:0.5b",
             api_base="http://ollama:11434",
-            messages=messages_dicts,
+            messages=redacted_messages_dicts,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -237,6 +253,7 @@ async def chat_completions(
             "provider": provider,
             "latency_ms": round(elapsed_ms, 1),
             "status_code": 200,
+            "has_pii_redacted": has_pii_redacted_any,
         },
     )
 

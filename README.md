@@ -42,7 +42,7 @@ flowchart TD
         
         subgraph Interceptors ["Middleware Checks"]
             Cache["Semantic Cache"]:::built
-            Guard["Safety Guardrails"]:::planned
+            Guard["Safety Guardrails"]:::partial
             Eval["Auto-Evaluator"]:::planned
         end
         
@@ -102,7 +102,7 @@ flowchart TD
 | **Semantic Caching** | Live | Exact-match caching is Live: cache key uses a SHA-256 hash of the full normalized message history (all roles, all turns) to guarantee context safety, and embedding generation uses only the latest user message. True cosine-similarity threshold scan against stored vectors remains Planned. |
 | **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
 | **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama fallback and a robust HALF_OPEN concurrent-probe limit (ensuring only a single probe is in-flight via a non-blocking asyncio race condition check). |
-| **Safety Guardrails** | Planned | PII redaction and prompt injection detection (Week 3). |
+| **Safety Guardrails** | Partial | PII redaction is Live: automatically detects and redacts emails, phone numbers, credit cards (validated via Luhn checksum), SSNs, and IPv4 addresses on cache misses before sending to both LiteLLM and the embedding model. Toxicity and jailbreak detection remain Planned. |
 | **Auth & Rate Limiting** | Live | Fail-closed API key verification (returns 401 on invalid/missing key, 503 on service unavailability) and sliding-window rate limits per application (returns 429 when limits are exceeded, fails open and degrades gracefully on Redis failure), with real `app_id` routed to telemetry. |
 | **Prompt Registry** | Planned | Versioned prompt templates and overrides (Week 4). |
 
@@ -182,13 +182,62 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   },
   "trace_id": "0ba5829a-aaa7-4f2e-812d-405a81d04aa8"
 }
+
+### PII Redaction Example
+
+When a request contains personally identifiable information (PII), the gateway automatically redacts the sensitive values prior to calling the LLM and the embedding generator.
+
+**Request:**
+```bash
+curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer llmgov_sk_dev_app" \
+  -d '{
+    "model": "gemini/gemini-2.5-flash",
+    "messages": [{"role": "user", "content": "My email is secret-pii-miss-99@example.com. Repeat that email exactly."}],
+    "stream": false
+  }'
 ```
+
+**Response:**
+```json
+{
+  "id": "5bpbavK-OevSjuMP-I-saQ",
+  "object": "chat.completion",
+  "created": 1784396516,
+  "model": "gemini-2.5-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "[EMAIL]"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 32,
+    "total_tokens": 44
+  },
+  "trace_id": "b5bd2bae-5bd6-4973-a1c3-f3d233a2cf64"
+}
+```
+
+**Console Log Output:**
+```json
+{"timestamp": "2026-07-18T17:41:58.272606+00:00", "level": "INFO", "logger": "app.api.completions", "message": "Completion returned", "trace_id": "b5bd2bae-5bd6-4973-a1c3-f3d233a2cf64", "model": "gemini-2.5-flash", "provider": "gemini", "latency_ms": 1337.9, "status_code": 200, "has_pii_redacted": true}
+```
+
 
 ## Reliability
 
 Gateway failover is hardened by an automated state-machine chaos test that systematically triggers failures to verify circuit breaker transitions (`CLOSED` → `OPEN` → `HALF_OPEN` → `CLOSED`), ensuring requests bypass failing primary providers instantly and autonomously return once recovery timeouts elapse. Additionally, a concurrency-safe integration test validates the `HALF_OPEN` state using a real `asyncio.Event`-gated interleaving mechanism, proving that multiple parallel requests are safely throttled to a single primary probe while concurrent traffic gets seamlessly routed to Ollama.
 
 Furthermore, the sliding-window rate limiter employs a fail-open design: if Redis encounters a connection or query error while verifying the rate limit, the error is logged loudly and the request is permitted to proceed, avoiding hard-stops on network degradation.
+
+To enforce compliance and data privacy, PII redaction runs automatically on every request before reaching any external API, ensuring sensitive information (e.g. emails, phone numbers) never reaches Google's free-tier AI Studio endpoint where inputs may be used for model training.
 
 ## Project Structure
 
@@ -205,6 +254,7 @@ LLMGov/
 │   │   ├── circuit_breaker.py   # Provider circuit breaker state machine
 │   │   ├── embeddings.py        # Gemini embedding helper (768-dim)
 │   │   ├── logging.py           # Structured JSON logger
+│   │   ├── pii.py               # Regex-based PII redaction module
 │   │   ├── redis.py             # Redis connection pool lifecycle
 │   │   └── telemetry.py         # Async ClickHouse metric writer
 │   ├── middleware/

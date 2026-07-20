@@ -37,7 +37,7 @@ class JSONFormatter(logging.Formatter):
             log_entry["trace_id"] = trace_id
 
         # Merge any extra fields passed via `extra={...}`
-        for key in ("model", "provider", "app_id", "latency_ms", "status_code", "has_pii_redacted"):
+        for key in ("model", "provider", "app_id", "latency_ms", "status_code", "has_pii_redacted", "toxicity_score", "is_toxic", "jailbreak_score", "is_jailbreak"):
             value = getattr(record, key, None)
             if value is not None:
                 log_entry[key] = value

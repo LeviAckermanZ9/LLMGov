@@ -16,6 +16,24 @@ def mock_auth_and_rate_limit_globally(request):
          patch("app.api.completions.check_rate_limit", AsyncMock(return_value=True)):
         yield
 
+@pytest.fixture(autouse=True)
+def mock_jailbreak_globally(request):
+    """
+    Globally mock detect_jailbreak for all tests that hit the completions
+    endpoint, except dedicated jailbreak wiring tests. This prevents
+    tests from triggering real Gemini API calls for jailbreak reference
+    vector initialization.
+    """
+    if "test_jailbreak_wiring" in request.module.__name__:
+        yield
+        return
+    if "test_jailbreak" in request.module.__name__:
+        yield
+        return
+
+    with patch("app.api.completions.detect_jailbreak", AsyncMock(return_value=(0.0, False))):
+        yield
+
 @pytest.fixture
 def auth_headers():
     """
@@ -45,4 +63,3 @@ def auth_headers():
         for rkey in redis_client.scan_iter(f"llmgov:ratelimit:{app_id}:*"):
             redis_client.delete(rkey)
         redis_client.close()
-

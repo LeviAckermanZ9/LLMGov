@@ -26,6 +26,9 @@ from app.core.logging import get_logger
 from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
 from app.core.pii import redact_pii
+from app.core.toxicity import classify_toxicity
+from app.core.jailbreak import detect_jailbreak
+from app.core.prompt_registry import registry as prompt_registry
 from app.models.completions import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -126,7 +129,14 @@ async def chat_completions(
     )
 
     start_ms = time.perf_counter() * 1000
-    prompt_version = "v1" # Hardcoded for now per spec chunks
+
+    # ── Prompt version selection via A/B registry ──
+    try:
+        selected_prompt = prompt_registry.select_version("default")
+        prompt_version = selected_prompt.version
+    except (KeyError, ValueError):
+        # Registry not loaded or prompt not found — fall back to v1
+        prompt_version = "v1"
 
     # ── 1. Cache Read Path (Stubbed Hash) ──
     # Fast exact-match hash before any external API calls
@@ -217,6 +227,17 @@ async def chat_completions(
         logger.error("Embedding generation failed, vector will not be cached", exc_info=embedding_result)
         vector = []
 
+    # ── Jailbreak detection (input check) ──
+    # Reuses the embedding already computed for the cache path.
+    # Non-blocking: logs score + boolean, does not reject the request.
+    if vector:
+        jailbreak_score, is_jailbreak = await detect_jailbreak(
+            latest_user_content, prompt_embedding=vector
+        )
+    else:
+        # Embedding failed — skip jailbreak detection, log as 0.0/False
+        jailbreak_score, is_jailbreak = 0.0, False
+
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
     provider = "ollama" if fallback_used else _extract_provider(request.model)
 
@@ -246,6 +267,10 @@ async def chat_completions(
         trace_id=trace_id,
     )
 
+    # Classify toxicity on the generated response content
+    response_content = " ".join([c.message.content for c in result.choices if c.message and c.message.content])
+    toxicity_score, is_toxic = classify_toxicity(response_content)
+
     logger.info(
         "Completion returned",
         extra={
@@ -254,6 +279,10 @@ async def chat_completions(
             "latency_ms": round(elapsed_ms, 1),
             "status_code": 200,
             "has_pii_redacted": has_pii_redacted_any,
+            "toxicity_score": toxicity_score,
+            "is_toxic": is_toxic,
+            "jailbreak_score": jailbreak_score,
+            "is_jailbreak": is_jailbreak,
         },
     )
 

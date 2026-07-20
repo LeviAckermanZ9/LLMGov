@@ -1,0 +1,19 @@
+# Grafana — Auto-provisioned ClickHouse datasource for LLMGov
+
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    url: http://clickhouse:8123
+    jsonData:
+      defaultDatabase: default
+      port: 9000
+      server: clickhouse
+      username: default
+      tlsSkipVerify: true
+    secureJsonData:
+      password: llmgov_dev
+    isDefault: true
+    editable: true

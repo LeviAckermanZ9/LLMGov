@@ -1,0 +1,24 @@
+# LLMGov — Prompt Registry Configuration
+#
+# Versioned prompt templates for A/B traffic splitting.
+# Per spec §5.2: "a versioned config file checked into git is a legitimate v1."
+#
+# Each prompt entry has a unique prompt_id and one or more versions.
+# Weights control A/B traffic distribution — higher weight = more traffic.
+# Template variables use {{variable_name}} syntax.
+
+prompts:
+  - prompt_id: default
+    versions:
+      - version: "v1"
+        template_text: "{{user_message}}"
+        weight: 0.8
+      - version: "v2"
+        template_text: "You are a helpful, concise assistant. {{user_message}}"
+        weight: 0.2
+
+  - prompt_id: summarize
+    versions:
+      - version: "v1"
+        template_text: "Summarize the following text concisely: {{user_message}}"
+        weight: 1.0

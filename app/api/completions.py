@@ -26,6 +26,7 @@ from app.core.logging import get_logger
 from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
 from app.core.pii import redact_pii
+from app.core.toxicity import classify_toxicity
 from app.models.completions import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -246,6 +247,10 @@ async def chat_completions(
         trace_id=trace_id,
     )
 
+    # Classify toxicity on the generated response content
+    response_content = " ".join([c.message.content for c in result.choices if c.message and c.message.content])
+    toxicity_score, is_toxic = classify_toxicity(response_content)
+
     logger.info(
         "Completion returned",
         extra={
@@ -254,6 +259,8 @@ async def chat_completions(
             "latency_ms": round(elapsed_ms, 1),
             "status_code": 200,
             "has_pii_redacted": has_pii_redacted_any,
+            "toxicity_score": toxicity_score,
+            "is_toxic": is_toxic,
         },
     )
 

@@ -27,6 +27,7 @@ from app.core.telemetry import write_metrics
 from app.middleware.request_id import get_request_id
 from app.core.pii import redact_pii
 from app.core.toxicity import classify_toxicity
+from app.core.jailbreak import detect_jailbreak
 from app.models.completions import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -218,6 +219,17 @@ async def chat_completions(
         logger.error("Embedding generation failed, vector will not be cached", exc_info=embedding_result)
         vector = []
 
+    # ── Jailbreak detection (input check) ──
+    # Reuses the embedding already computed for the cache path.
+    # Non-blocking: logs score + boolean, does not reject the request.
+    if vector:
+        jailbreak_score, is_jailbreak = await detect_jailbreak(
+            latest_user_content, prompt_embedding=vector
+        )
+    else:
+        # Embedding failed — skip jailbreak detection, log as 0.0/False
+        jailbreak_score, is_jailbreak = 0.0, False
+
     elapsed_ms = (time.perf_counter() * 1000) - start_ms
     provider = "ollama" if fallback_used else _extract_provider(request.model)
 
@@ -261,6 +273,8 @@ async def chat_completions(
             "has_pii_redacted": has_pii_redacted_any,
             "toxicity_score": toxicity_score,
             "is_toxic": is_toxic,
+            "jailbreak_score": jailbreak_score,
+            "is_jailbreak": is_jailbreak,
         },
     )
 

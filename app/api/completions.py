@@ -28,6 +28,7 @@ from app.middleware.request_id import get_request_id
 from app.core.pii import redact_pii
 from app.core.toxicity import classify_toxicity
 from app.core.jailbreak import detect_jailbreak
+from app.core.prompt_registry import registry as prompt_registry
 from app.models.completions import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -128,7 +129,14 @@ async def chat_completions(
     )
 
     start_ms = time.perf_counter() * 1000
-    prompt_version = "v1" # Hardcoded for now per spec chunks
+
+    # ── Prompt version selection via A/B registry ──
+    try:
+        selected_prompt = prompt_registry.select_version("default")
+        prompt_version = selected_prompt.version
+    except (KeyError, ValueError):
+        # Registry not loaded or prompt not found — fall back to v1
+        prompt_version = "v1"
 
     # ── 1. Cache Read Path (Stubbed Hash) ──
     # Fast exact-match hash before any external API calls

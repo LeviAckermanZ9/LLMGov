@@ -1,4 +1,5 @@
 import pytest
+pytestmark = pytest.mark.usefixtures('mock_jailbreak_globally')
 import hashlib
 from typing import Any, Awaitable, cast
 from unittest.mock import patch, MagicMock, AsyncMock

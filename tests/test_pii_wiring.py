@@ -1,4 +1,5 @@
 import pytest
+pytestmark = pytest.mark.usefixtures('mock_jailbreak_globally')
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from app.main import app

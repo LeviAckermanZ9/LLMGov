@@ -16,7 +16,7 @@ def mock_auth_and_rate_limit_globally(request):
          patch("app.api.completions.check_rate_limit", AsyncMock(return_value=True)):
         yield
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_jailbreak_globally(request):
     """
     Globally mock detect_jailbreak for all tests that hit the completions

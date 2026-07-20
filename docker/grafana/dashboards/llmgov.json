@@ -1,0 +1,53 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Cost by Team, Model, Prompt Version (Last 30 Days)",
+      "type": "table",
+      "targets": [
+        {
+          "rawSql": "SELECT app_id, model_used, prompt_version, sum(calculated_cost) AS total_cost FROM default.llm_metrics WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY app_id, model_used, prompt_version ORDER BY total_cost DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
+      "id": 2,
+      "title": "Latency Percentiles by Provider (Last 24 Hours)",
+      "type": "table",
+      "targets": [
+        {
+          "rawSql": "SELECT provider, quantile(0.50)(total_duration_ms) AS p50_ms, quantile(0.95)(total_duration_ms) AS p95_ms, quantile(0.99)(total_duration_ms) AS p99_ms FROM default.llm_metrics WHERE timestamp > now() - INTERVAL 1 DAY GROUP BY provider",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["llmgov"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "LLMGov — Cost & Latency",
+  "uid": "llmgov-main",
+  "version": 1
+}

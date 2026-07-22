@@ -28,26 +28,51 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 ## Architecture
 
 ```mermaid
-C4Container
-    title Container Diagram for LLMGov AI Gateway Stack
+flowchart TD
+    classDef client fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:white;
+    classDef gateway fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
+    classDef core fill:#388e3c,stroke:#1b5e20,stroke-width:1px,color:white;
+    classDef cloud fill:#e65100,stroke:#b71c1c,stroke-width:2px,color:white;
+    classDef local fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:white;
+    classDef db fill:#00838f,stroke:#006064,stroke-width:2px,color:white;
+    classDef dash fill:#f57c00,stroke:#e65100,stroke-width:2px,color:white;
 
-    Person(client, "Client Application", "Upstream API client making OpenAI-compatible completion requests")
-    System_Ext(gemini, "Google Gemini API", "External cloud LLM provider (gemini-2.5-flash)")
+    Client([Client Application]):::client
 
-    System_Boundary(llmgov, "LLMGov Host Environment (AWS EC2 / Docker Compose)") {
-        Container(app, "LLMGov Gateway", "Python / FastAPI", "Auth, Rate Limiting, Guardrails, Cache, Circuit Breaker & Telemetry")
-        ContainerDb(redis, "Redis Store", "Redis 7.4", "Rate-limit counters, exact semantic cache & embedding vectors")
-        Container(ollama, "Ollama Engine", "Ollama (qwen2.5:0.5b)", "Local fallback LLM engine for cloud failure resilience")
-        ContainerDb(clickhouse, "ClickHouse OLAP", "ClickHouse 24.8", "Telemetry logs (llm_metrics) & audit logs (llm_audit_logs)")
-        Container(grafana, "Grafana Dashboards", "Grafana 11", "Real-time cost attribution, latency & error rate dashboards")
-    }
+    subgraph LLMGOV [LLMGov Host Environment — AWS EC2 / Docker Compose]
+        direction TB
+        subgraph Gateway [LLMGov FastAPI Gateway]
+            direction TB
+            Auth[Auth & Sliding-Window Rate Limiter]:::core
+            Guard[Guardrails: PII / Toxicity / Jailbreak]:::core
+            Cache[Exact & Semantic Cache Engine]:::core
+            Router[Prompt Registry & A/B Router]:::core
+            CB[Circuit Breaker State Machine]:::core
+            Telemetry[Async Telemetry & Audit Writer]:::core
+            Eval[Async LLM-as-a-Judge Eval Harness]:::core
 
-    Rel(client, app, "Completion requests", "HTTP / JSON")
-    Rel(app, gemini, "Primary completions", "HTTPS / JSON")
-    Rel(app, redis, "Rate limits & cache", "RESP / TCP")
-    Rel(app, ollama, "Fallback completions", "HTTP / JSON")
-    Rel(app, clickhouse, "Async telemetry & audit logs", "HTTP / Native")
-    Rel(grafana, clickhouse, "SQL telemetry queries", "HTTP / SQL")
+            Auth --> Guard --> Cache --> Router --> CB
+            CB -.-> Telemetry
+            CB -.-> Eval
+        end
+
+        Redis[(Redis Store\nAuth / Limits / Cache)]:::db
+        Ollama[Ollama Engine\nqwen2.5:0.5b Fallback]:::local
+        ClickHouse[(ClickHouse OLAP\nllm_metrics / llm_audit_logs / llm_eval_results)]:::db
+        Grafana[Grafana Dashboards\nPort 3000]:::dash
+
+        Auth <--> Redis
+        Cache <--> Redis
+        CB -->|"Fallback Routing (Circuit Breaker OPEN)"| Ollama
+        Telemetry -->|"Async Metrics & Audit Log Hash-Chain"| ClickHouse
+        Eval -->|"Async Evaluation Results"| ClickHouse
+        Grafana -->|"SQL Metrics Queries"| ClickHouse
+    end
+
+    Gemini[Google Gemini API\ngemini-2.5-flash]:::cloud
+
+    Client -->|"POST /v1/chat/completions (HTTPS)"| Gateway
+    CB -->|"Primary Request Routing"| Gemini
 ```
 
 ### C4 Level 2 Container Architecture Narrative

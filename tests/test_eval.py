@@ -110,8 +110,7 @@ def test_record_eval_result_clickhouse():
         assert call_kwargs["data"][0][5] == 0  # hand_labeled int
 
 
-@pytest.mark.asyncio
-async def test_evaluate_and_record_response_flow():
+def test_evaluate_and_record_response_flow():
     """Tests high-level evaluate_and_record_response task combining validation, judge, and DB insert."""
     mock_ch_client = MagicMock()
     mock_judge_response = MagicMock()
@@ -120,11 +119,11 @@ async def test_evaluate_and_record_response_flow():
     ]
 
     with patch("app.core.eval._get_client", return_value=mock_ch_client), \
-         patch("litellm.acompletion", new_callable=AsyncMock) as mock_litellm:
+         patch("litellm.completion") as mock_litellm:
         mock_litellm.return_value = mock_judge_response
 
         trace_id = str(uuid.uuid4())
-        await evaluate_and_record_response(
+        evaluate_and_record_response(
             trace_id=trace_id,
             prompt="Explain quantum computing.",
             response_text="Quantum computing uses qubits in superposition.",

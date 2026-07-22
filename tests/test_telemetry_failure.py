@@ -1,4 +1,5 @@
 import pytest
+pytestmark = pytest.mark.usefixtures('mock_jailbreak_globally', 'mock_eval_globally')
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
@@ -52,7 +53,7 @@ async def test_telemetry_write_failure_does_not_break_response(caplog, auth_head
         assert data["choices"][0]["message"]["content"] == "mock content"
 
         # 3. Assert ClickHouse insert was actually attempted
-        mock_ch_client.insert.assert_called_once()
+        mock_ch_client.insert.assert_called()
         
         # 4. Assert telemetry failure was logged
         assert "Failed to write telemetry row" in caplog.text

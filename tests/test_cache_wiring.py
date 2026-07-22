@@ -1,5 +1,5 @@
 import pytest
-pytestmark = pytest.mark.usefixtures('mock_jailbreak_globally')
+pytestmark = pytest.mark.usefixtures('mock_jailbreak_globally', 'mock_eval_globally')
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
@@ -9,11 +9,13 @@ from app.core.redis import _redis_client
 
 @pytest.fixture
 def mock_redis():
-    mock = AsyncMock()
-    # default to miss
-    mock.get.return_value = None
-    
-    # We must patch get_redis instead of _redis_client because it's required by the cache functions
+    mock = MagicMock()
+    mock.get = AsyncMock(return_value=None)
+    pipe = AsyncMock()
+    pipe.__aenter__.return_value = pipe
+    pipe.__aexit__.return_value = None
+    mock.pipeline.return_value = pipe
+
     with patch("app.core.cache.get_redis", return_value=mock):
         yield mock
 

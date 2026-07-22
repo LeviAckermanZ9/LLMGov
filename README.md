@@ -28,57 +28,73 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 ## Architecture
 
 ```mermaid
-flowchart TD
-    %% Define Styles
-    classDef built fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
-    classDef partial fill:#fb8c00,stroke:#e65100,stroke-width:4px,color:white;
-    classDef planned fill:#eeeeee,stroke:#999999,stroke-width:2px,stroke-dasharray: 5 5,color:#555555;
+C4Container
+    title Container Diagram for LLMGov AI Gateway Stack
 
-    Client(["Client App"]) --> Gateway
-    
-    subgraph Gateway ["LLMGov FastAPI Gateway (AWS EC2 / Docker)"]
-        direction TB
-        Ingest["Ingestion & Request ID"]:::built
-        Auth["Auth & Rate Limit"]:::built
-        
-        Ingest --> Auth
-        
-        subgraph Interceptors ["Middleware Checks"]
-            Cache["Semantic Cache"]:::built
-            Guard["Safety Guardrails"]:::built
-            Eval["Auto-Evaluator"]:::planned
-        end
-        
-        Auth --> Interceptors
-        
-        Registry["Prompt Registry & Router"]:::built
-        Interceptors --> Registry
-        
-        ProviderAbstraction["Provider Abstraction"]:::built
-        Registry --> ProviderAbstraction
-        
-        CircuitBreaker["Circuit Breaker"]:::built
-        ProviderAbstraction --> CircuitBreaker
-        
-        Telemetry["Telemetry Async Writer"]:::built
-        ProviderAbstraction --> Telemetry
-    end
-    
-    PrimaryProvider["Gemini 2.5 Flash"]:::built
-    FallbackProvider["Ollama (Local Fallback)"]:::built
-    
-    CH[("ClickHouse\nllm_metrics")]:::built
-    Redis[("Redis\nCache/Limits")]:::built
-    
-    CircuitBreaker --> PrimaryProvider
-    CircuitBreaker --> FallbackProvider
-    Telemetry --> CH
-    Auth -.-> Redis
-    Cache --> Redis
-    
-    Grafana["Grafana Dashboards"]:::built
-    CH -.-> Grafana
+    Person(client, "Client Application", "External client making OpenAI-compatible completion requests.")
+
+    System_Boundary(llmgov, "LLMGov Host Environment (AWS EC2 / Docker Compose)") {
+        Container(app, "LLMGov Gateway", "Python 3.13 / FastAPI", "Handles Auth, Rate Limiting, Guardrails, Prompt Routing, Circuit Breaking, & Telemetry.")
+        ContainerDb(redis, "Redis Store", "Redis 7.4", "Stores API key rate-limiting counters, exact request hash cache, and embedding vectors.")
+        ContainerDb(clickhouse, "ClickHouse OLAP", "ClickHouse 24.8", "Stores high-throughput telemetry logs (llm_metrics) and audit logs (llm_audit_logs).")
+        Container(ollama, "Ollama Engine", "Ollama Container (qwen2.5:0.5b)", "Local fallback LLM engine for resilient completions under cloud failure.")
+        Container(grafana, "Grafana Dashboards", "Grafana 11", "Provides real-time dashboards for cost attribution, latency metrics, and error rates.")
+    }
+
+    System_Ext(gemini, "Google Gemini API", "External Cloud LLM Provider (gemini-2.5-flash).")
+
+    Rel(client, app, "Sends POST /v1/chat/completions", "HTTP / JSON")
+    Rel(app, redis, "Checks rate limits & reads/writes semantic cache", "RESP / TCP")
+    Rel(app, gemini, "Dispatches primary completion requests", "HTTPS / JSON")
+    Rel(app, ollama, "Dispatches fallback completion requests (Circuit Breaker OPEN)", "HTTP / JSON")
+    Rel(app, clickhouse, "Async writes telemetry metrics & audit logs", "HTTP / Native")
+    Rel(grafana, clickhouse, "Queries telemetry metrics for visualization", "HTTP / SQL")
 ```
+
+### C4 Level 2 Container Architecture Narrative
+
+The **LLMGov** system is structured as a collection of isolated, containerized services orchestrated via Docker Compose on an AWS EC2 instance (`t3.large`). It operates as a governance proxy between upstream client applications and LLM backends.
+
+#### Container Boundaries & Responsibilities
+
+1. **Client Application (`client`):**
+   - **Role:** Upstream consumer applications interacting via standard OpenAI-compatible REST endpoints (`/v1/chat/completions`).
+   - **Protocol:** HTTP over TCP (Port 8000).
+
+2. **LLMGov Gateway (`app`):**
+   - **Role:** Asynchronous Python / FastAPI gateway container executing the core governance pipeline.
+   - **Responsibilities:**
+     - Ingests requests and assigns unique `trace_id` correlation IDs.
+     - Validates bearer API keys and enforces sliding-window rate limits against **Redis**.
+     - Evaluates input guardrails (PII redaction, toxicity filtering, jailbreak detection).
+     - Checks the exact SHA-256 semantic cache in **Redis**.
+     - Formats versioned prompt templates via the Prompt Registry (`prompts.yaml`).
+     - Dispatches primary completion requests to the **Google Gemini API** via LiteLLM abstraction.
+     - Monitors provider health via an integrated Circuit Breaker; automatically reroutes requests to **Ollama** if Gemini fails or trips the circuit breaker.
+     - Asynchronously writes operational telemetry to **ClickHouse**.
+
+3. **Redis Store (`redis`):**
+   - **Role:** High-speed in-memory database (v7.4).
+   - **Responsibilities:** Maintains API key sliding-window rate limit counters, stores exact SHA-256 request payload caches with TTL expiration, and holds reference embedding vectors.
+
+4. **ClickHouse OLAP (`clickhouse`):**
+   - **Role:** Columnar analytical database (v24.8).
+   - **Responsibilities:** Persists high-volume, append-only operational telemetry into `default.llm_metrics` and compliance audit trails into `default.llm_audit_logs`. Supports low-latency analytical aggregations over millions of records.
+
+5. **Ollama Local Engine (`ollama`):**
+   - **Role:** Containerized local LLM inference engine running `qwen2.5:0.5b`.
+   - **Responsibilities:** Serves as a zero-cost, localized emergency fallback backend when primary cloud providers encounter outages or trip circuit breakers.
+
+6. **Grafana Dashboards (`grafana`):**
+   - **Role:** Auto-provisioned visualization server (v11) listening on Port 3000.
+   - **Responsibilities:** Connects directly to ClickHouse via SQL interface to render real-time telemetry panels, tracking p50/p95/p99 latencies, token spend by application ID, and error rates.
+
+7. **Google Gemini API (`gemini`):**
+   - **Role:** External cloud LLM provider (`gemini/gemini-2.5-flash`).
+   - **Responsibilities:** Serves primary chat completion requests dispatched by the gateway over HTTPS.
+
+---
+
 
 ## Tech Stack
 

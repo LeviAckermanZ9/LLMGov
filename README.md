@@ -31,24 +31,23 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 C4Container
     title Container Diagram for LLMGov AI Gateway Stack
 
-    Person(client, "Client Application", "External client making OpenAI-compatible completion requests.")
+    Person(client, "Client Application", "Upstream API client making OpenAI-compatible completion requests")
+    System_Ext(gemini, "Google Gemini API", "External cloud LLM provider (gemini-2.5-flash)")
 
     System_Boundary(llmgov, "LLMGov Host Environment (AWS EC2 / Docker Compose)") {
-        Container(app, "LLMGov Gateway", "Python 3.13 / FastAPI", "Handles Auth, Rate Limiting, Guardrails, Prompt Routing, Circuit Breaking, & Telemetry.")
-        ContainerDb(redis, "Redis Store", "Redis 7.4", "Stores API key rate-limiting counters, exact request hash cache, and embedding vectors.")
-        ContainerDb(clickhouse, "ClickHouse OLAP", "ClickHouse 24.8", "Stores high-throughput telemetry logs (llm_metrics) and audit logs (llm_audit_logs).")
-        Container(ollama, "Ollama Engine", "Ollama Container (qwen2.5:0.5b)", "Local fallback LLM engine for resilient completions under cloud failure.")
-        Container(grafana, "Grafana Dashboards", "Grafana 11", "Provides real-time dashboards for cost attribution, latency metrics, and error rates.")
+        Container(app, "LLMGov Gateway", "Python / FastAPI", "Auth, Rate Limiting, Guardrails, Cache, Circuit Breaker & Telemetry")
+        ContainerDb(redis, "Redis Store", "Redis 7.4", "Rate-limit counters, exact semantic cache & embedding vectors")
+        Container(ollama, "Ollama Engine", "Ollama (qwen2.5:0.5b)", "Local fallback LLM engine for cloud failure resilience")
+        ContainerDb(clickhouse, "ClickHouse OLAP", "ClickHouse 24.8", "Telemetry logs (llm_metrics) & audit logs (llm_audit_logs)")
+        Container(grafana, "Grafana Dashboards", "Grafana 11", "Real-time cost attribution, latency & error rate dashboards")
     }
 
-    System_Ext(gemini, "Google Gemini API", "External Cloud LLM Provider (gemini-2.5-flash).")
-
-    Rel(client, app, "Sends POST /v1/chat/completions", "HTTP / JSON")
-    Rel(app, redis, "Checks rate limits & reads/writes semantic cache", "RESP / TCP")
-    Rel(app, gemini, "Dispatches primary completion requests", "HTTPS / JSON")
-    Rel(app, ollama, "Dispatches fallback completion requests (Circuit Breaker OPEN)", "HTTP / JSON")
-    Rel(app, clickhouse, "Async writes telemetry metrics & audit logs", "HTTP / Native")
-    Rel(grafana, clickhouse, "Queries telemetry metrics for visualization", "HTTP / SQL")
+    Rel(client, app, "Completion requests", "HTTP / JSON")
+    Rel(app, gemini, "Primary completions", "HTTPS / JSON")
+    Rel(app, redis, "Rate limits & cache", "RESP / TCP")
+    Rel(app, ollama, "Fallback completions", "HTTP / JSON")
+    Rel(app, clickhouse, "Async telemetry & audit logs", "HTTP / Native")
+    Rel(grafana, clickhouse, "SQL telemetry queries", "HTTP / SQL")
 ```
 
 ### C4 Level 2 Container Architecture Narrative

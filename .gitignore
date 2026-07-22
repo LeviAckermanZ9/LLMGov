@@ -55,3 +55,9 @@ docs_extracted*.txt
 spec.txt
 scratch*.py
 tests/scratch*.py
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.pem

@@ -28,27 +28,58 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 ## Architecture
 
 ```mermaid
-C4Container
-    title Container Diagram for LLMGov AI Gateway Stack
+flowchart TD
+    %% Define Styles
+    classDef built fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
+    classDef ext fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:white;
+    classDef cloud fill:#e65100,stroke:#b71c1c,stroke-width:2px,color:white;
+    classDef db fill:#00838f,stroke:#006064,stroke-width:2px,color:white;
+    classDef dash fill:#f57c00,stroke:#e65100,stroke-width:2px,color:white;
 
-    Person(client, "Client Application", "External client making OpenAI-compatible completion requests.")
+    Client([Client App]):::ext -->|"POST /v1/chat/completions"| Gateway
 
-    System_Boundary(llmgov, "LLMGov Host Environment (AWS EC2 / Docker Compose)") {
-        Container(app, "LLMGov Gateway", "Python 3.13 / FastAPI", "Handles Auth, Rate Limiting, Guardrails, Prompt Routing, Circuit Breaking, & Telemetry.")
-        ContainerDb(redis, "Redis Store", "Redis 7.4", "Stores API key rate-limiting counters, exact request hash cache, and embedding vectors.")
-        ContainerDb(clickhouse, "ClickHouse OLAP", "ClickHouse 24.8", "Stores high-throughput telemetry logs (llm_metrics) and audit logs (llm_audit_logs).")
-        Container(ollama, "Ollama Engine", "Ollama Container (qwen2.5:0.5b)", "Local fallback LLM engine for resilient completions under cloud failure.")
-        Container(grafana, "Grafana Dashboards", "Grafana 11", "Provides real-time dashboards for cost attribution, latency metrics, and error rates.")
-    }
+    subgraph Gateway [LLMGov FastAPI Gateway]
+        direction TB
+        Ingest[Ingestion & Request ID]:::built
+        Auth[Auth & Rate Limiter]:::built
 
-    System_Ext(gemini, "Google Gemini API", "External Cloud LLM Provider (gemini-2.5-flash).")
+        Ingest --> Auth
 
-    Rel(client, app, "Sends POST /v1/chat/completions", "HTTP / JSON")
-    Rel(app, redis, "Checks rate limits & reads/writes semantic cache", "RESP / TCP")
-    Rel(app, gemini, "Dispatches primary completion requests", "HTTPS / JSON")
-    Rel(app, ollama, "Dispatches fallback completion requests (Circuit Breaker OPEN)", "HTTP / JSON")
-    Rel(app, clickhouse, "Async writes telemetry metrics & audit logs", "HTTP / Native")
-    Rel(grafana, clickhouse, "Queries telemetry metrics for visualization", "HTTP / SQL")
+        subgraph Interceptors [Middleware Checks]
+            direction LR
+            Guard[Safety Guardrails\nPII / Toxicity / Jailbreak]:::built
+            Cache[Semantic Cache]:::built
+            Eval[Auto-Evaluator\nLLM-as-a-Judge]:::built
+        end
+
+        Auth --> Interceptors
+
+        Registry[Prompt Registry & Router]:::built
+        Interceptors --> Registry
+
+        ProviderAbstraction[Provider Abstraction & Circuit Breaker]:::built
+        Registry --> ProviderAbstraction
+
+        Telemetry[Telemetry & Audit Async Writer]:::built
+        ProviderAbstraction --> Telemetry
+    end
+
+    PrimaryProvider[Google Gemini 2.5 Flash]:::cloud
+    FallbackProvider[Ollama Local Fallback\nqwen2.5:0.5b]:::built
+
+    ProviderAbstraction --> PrimaryProvider
+    ProviderAbstraction -.->|"Circuit Breaker OPEN"| FallbackProvider
+
+    CH[(ClickHouse OLAP\nmetrics / audit / evals)]:::db
+    Redis[(Redis Store\nAuth / Limits / Cache)]:::db
+
+    Telemetry -->|"Async Writes"| CH
+    Eval -.->|"Async Eval Logs"| CH
+    Auth <--> Redis
+    Cache <--> Redis
+
+    Grafana[Grafana Dashboards\nPort 3000]:::dash
+    CH -.-> Grafana
 ```
 
 ### C4 Level 2 Container Architecture Narrative

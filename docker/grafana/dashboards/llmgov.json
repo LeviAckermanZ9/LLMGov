@@ -12,13 +12,13 @@
         "defaults": { "unit": "currencyUSD" },
         "overrides": []
       },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
-      "title": "Cost by Team, Model, Prompt Version (Last 30 Days)",
+      "title": "Cost & Request Volume by Team (Last 30 Days)",
       "type": "table",
       "targets": [
         {
-          "rawSql": "SELECT app_id, model_used, prompt_version, sum(calculated_cost) AS total_cost FROM default.llm_metrics WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY app_id, model_used, prompt_version ORDER BY total_cost DESC",
+          "rawSql": "SELECT app_id, model_used, prompt_version, count() AS total_requests, sum(calculated_cost) AS total_cost FROM default.llm_metrics WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY app_id, model_used, prompt_version ORDER BY total_requests DESC",
           "format": "table",
           "refId": "A"
         }
@@ -30,7 +30,7 @@
         "defaults": { "unit": "ms" },
         "overrides": []
       },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "title": "Latency Percentiles by Provider (Last 24 Hours)",
       "type": "table",
@@ -41,13 +41,49 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "LLM-as-a-Judge Evaluation Summary (Last 7 Days)",
+      "type": "table",
+      "targets": [
+        {
+          "rawSql": "SELECT round(avg(judge_score), 2) AS avg_judge_score, round(avg(schema_valid) * 100, 1) AS schema_valid_pct, count() AS total_evaluations FROM default.llm_eval_results WHERE timestamp > now() - INTERVAL 7 DAY",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 4,
+      "title": "Recent Auto-Evaluator Judge Results (Live Feed)",
+      "type": "table",
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, trace_id, schema_valid, judge_score, judge_rationale FROM default.llm_eval_results ORDER BY timestamp DESC LIMIT 20",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,
   "tags": ["llmgov"],
   "templating": { "list": [] },
   "time": { "from": "now-30d", "to": "now" },
-  "title": "LLMGov — Cost & Latency",
+  "title": "LLMGov — Governance & Observability",
   "uid": "llmgov-main",
-  "version": 1
+  "version": 2
 }

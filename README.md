@@ -29,50 +29,57 @@ LLMGov provides a centralized control plane for enterprise LLM consumption. Rath
 
 ```mermaid
 flowchart TD
-    classDef client fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:white;
-    classDef gateway fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
-    classDef core fill:#388e3c,stroke:#1b5e20,stroke-width:1px,color:white;
+    %% Define Styles
+    classDef built fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:white;
+    classDef ext fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:white;
     classDef cloud fill:#e65100,stroke:#b71c1c,stroke-width:2px,color:white;
-    classDef local fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:white;
     classDef db fill:#00838f,stroke:#006064,stroke-width:2px,color:white;
     classDef dash fill:#f57c00,stroke:#e65100,stroke-width:2px,color:white;
 
-    Client([Client Application]):::client
+    Client([Client App]):::ext -->|"POST /v1/chat/completions"| Gateway
 
-    subgraph LLMGOV [LLMGov Host Environment — AWS EC2 / Docker Compose]
+    subgraph Gateway [LLMGov FastAPI Gateway]
         direction TB
-        subgraph Gateway [LLMGov FastAPI Gateway]
-            direction TB
-            Auth[Auth & Sliding-Window Rate Limiter]:::core
-            Guard[Guardrails: PII / Toxicity / Jailbreak]:::core
-            Cache[Exact & Semantic Cache Engine]:::core
-            Router[Prompt Registry & A/B Router]:::core
-            CB[Circuit Breaker State Machine]:::core
-            Telemetry[Async Telemetry & Audit Writer]:::core
-            Eval[Async LLM-as-a-Judge Eval Harness]:::core
+        Ingest[Ingestion & Request ID]:::built
+        Auth[Auth & Rate Limiter]:::built
 
-            Auth --> Guard --> Cache --> Router --> CB
-            CB -.-> Telemetry
-            CB -.-> Eval
+        Ingest --> Auth
+
+        subgraph Interceptors [Middleware Checks]
+            direction LR
+            Guard[Safety Guardrails\nPII / Toxicity / Jailbreak]:::built
+            Cache[Semantic Cache]:::built
+            Eval[Auto-Evaluator\nLLM-as-a-Judge]:::built
         end
 
-        Redis[(Redis Store\nAuth / Limits / Cache)]:::db
-        Ollama[Ollama Engine\nqwen2.5:0.5b Fallback]:::local
-        ClickHouse[(ClickHouse OLAP\nllm_metrics / llm_audit_logs / llm_eval_results)]:::db
-        Grafana[Grafana Dashboards\nPort 3000]:::dash
+        Auth --> Interceptors
 
-        Auth <--> Redis
-        Cache <--> Redis
-        CB -->|"Fallback Routing (Circuit Breaker OPEN)"| Ollama
-        Telemetry -->|"Async Metrics & Audit Log Hash-Chain"| ClickHouse
-        Eval -->|"Async Evaluation Results"| ClickHouse
-        Grafana -->|"SQL Metrics Queries"| ClickHouse
+        Registry[Prompt Registry & Router]:::built
+        Interceptors --> Registry
+
+        ProviderAbstraction[Provider Abstraction & Circuit Breaker]:::built
+        Registry --> ProviderAbstraction
+
+        Telemetry[Telemetry & Audit Async Writer]:::built
+        ProviderAbstraction --> Telemetry
     end
 
-    Gemini[Google Gemini API\ngemini-2.5-flash]:::cloud
+    PrimaryProvider[Google Gemini 2.5 Flash]:::cloud
+    FallbackProvider[Ollama Local Fallback\nqwen2.5:0.5b]:::built
 
-    Client -->|"POST /v1/chat/completions (HTTPS)"| Gateway
-    CB -->|"Primary Request Routing"| Gemini
+    ProviderAbstraction --> PrimaryProvider
+    ProviderAbstraction -.->|"Circuit Breaker OPEN"| FallbackProvider
+
+    CH[(ClickHouse OLAP\nmetrics / audit / evals)]:::db
+    Redis[(Redis Store\nAuth / Limits / Cache)]:::db
+
+    Telemetry -->|"Async Writes"| CH
+    Eval -.->|"Async Eval Logs"| CH
+    Auth <--> Redis
+    Cache <--> Redis
+
+    Grafana[Grafana Dashboards\nPort 3000]:::dash
+    CH -.-> Grafana
 ```
 
 ### C4 Level 2 Container Architecture Narrative

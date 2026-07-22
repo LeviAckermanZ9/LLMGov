@@ -84,7 +84,7 @@ async def run_llm_judge(
     model: str = "gemini/gemini-2.5-flash",
 ) -> Tuple[float, str]:
     """
-    Runs the LLM-as-a-Judge against a prompt/response pair.
+    Runs the LLM-as-a-Judge against a prompt/response pair asynchronously.
     Returns (judge_score, judge_rationale).
     """
     judge_messages = [
@@ -105,8 +105,6 @@ async def run_llm_judge(
         )
         content = completion.choices[0].message.content or ""
         
-        # Parse JSON response from judge
-        # Clean markdown code blocks if judge wrapped response in ```json ... ```
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -122,7 +120,6 @@ async def run_llm_judge(
         return score, rationale
     except Exception as e:
         logger.warning(f"LLM judge evaluation failed or fell back: {e}")
-        # Default heuristic score for fallbacks/refusals
         return 5.0, f"Judge evaluation fallback due to API state: {str(e)}"
 
 
@@ -137,7 +134,7 @@ def record_eval_result(
 ) -> None:
     """
     Inserts an evaluation row into default.llm_eval_results in ClickHouse.
-    Runs synchronously (meant to be called via asyncio.to_thread or BackgroundTasks).
+    Runs synchronously (meant to be called via BackgroundTasks).
     """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
@@ -171,7 +168,7 @@ def record_eval_result(
         logger.error("Failed to write llm_eval_results row", exc_info=True)
 
 
-async def evaluate_and_record_response(
+def evaluate_and_record_response(
     *,
     trace_id: str,
     prompt: str,
@@ -182,21 +179,56 @@ async def evaluate_and_record_response(
 ) -> None:
     """
     High-level out-of-band evaluation task combining Schema Validator, LLM-as-a-Judge,
-    and ClickHouse persistence into llm_eval_results.
+    and ClickHouse persistence into llm_eval_results. Runs synchronously for BackgroundTasks.
     """
-    # 1. Mechanical Schema Validation
-    is_valid = validate_schema(response_text, expected_schema)
+    try:
+        # 1. Mechanical Schema Validation
+        is_valid = validate_schema(response_text, expected_schema)
 
-    # 2. LLM-as-a-Judge Grader
-    score, rationale = await run_llm_judge(prompt, response_text)
+        # 2. LLM-as-a-Judge Grader (Synchronous LiteLLM call)
+        judge_messages = [
+            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"User Prompt:\n{prompt}\n\nAI Response:\n{response_text}",
+            },
+        ]
+        
+        try:
+            completion = litellm.completion(
+                model="gemini/gemini-2.5-flash",
+                messages=judge_messages,
+                temperature=0.0,
+                max_tokens=256,
+                api_key=settings.gemini_api_key or os.getenv("GEMINI_API_KEY"),
+            )
+            content = completion.choices[0].message.content or ""
+            
+            cleaned = content.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
 
-    # 3. ClickHouse Persistence (out-of-band thread)
-    await asyncio.to_thread(
-        record_eval_result,
-        trace_id=trace_id,
-        schema_valid=is_valid,
-        judge_score=score,
-        judge_rationale=rationale,
-        hand_labeled=hand_labeled,
-        timestamp=timestamp,
-    )
+            data = json.loads(cleaned)
+            score = float(data.get("judge_score", 5.0))
+            rationale = str(data.get("judge_rationale", "Evaluation completed successfully."))
+        except Exception as judge_err:
+            logger.warning(f"LLM judge evaluation failed or fell back: {judge_err}")
+            score = 5.0
+            rationale = f"Judge evaluation fallback: {str(judge_err)}"
+
+        # 3. ClickHouse Persistence
+        record_eval_result(
+            trace_id=trace_id,
+            schema_valid=is_valid,
+            judge_score=score,
+            judge_rationale=rationale,
+            hand_labeled=hand_labeled,
+            timestamp=timestamp,
+        )
+    except Exception as e:
+        logger.error(f"Failed out-of-band evaluate_and_record_response: {e}", exc_info=True)

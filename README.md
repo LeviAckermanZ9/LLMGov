@@ -7,8 +7,11 @@ A production-grade LLM gateway that unifies routing, semantic caching, safety gu
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?style=flat&logo=docker&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-1.15+-844FBA?style=flat&logo=terraform&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-EC2_ap--south--1-232F3E?style=flat&logo=amazon-aws&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-7.0+-DC382D?style=flat&logo=redis&logoColor=white)
 ![ClickHouse](https://img.shields.io/badge/ClickHouse-24.3+-FFCC01?style=flat&logo=clickhouse&logoColor=white)
+![Grafana](https://img.shields.io/badge/Grafana-13.0+-F46800?style=flat&logo=grafana&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat&logo=pydantic&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat&logo=google&logoColor=white)
 ![Ollama](https://img.shields.io/badge/Ollama-Local-white?style=flat&logo=ollama&logoColor=black)
@@ -33,7 +36,7 @@ flowchart TD
 
     Client(["Client App"]) --> Gateway
     
-    subgraph Gateway ["LLMGov FastAPI Gateway"]
+    subgraph Gateway ["LLMGov FastAPI Gateway (AWS EC2 / Docker)"]
         direction TB
         Ingest["Ingestion & Request ID"]:::built
         Auth["Auth & Rate Limit"]:::built
@@ -83,6 +86,8 @@ flowchart TD
 | :--- | :--- |
 | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) **Python / FastAPI** | High-performance asynchronous processing; native integration with Pydantic for strict request/response validation. |
 | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) **Docker Compose** | Ensures reproducible environments across dev and prod, isolating dependencies and standardizing deployments. |
+| ![Terraform](https://img.shields.io/badge/Terraform-844FBA?style=flat&logo=terraform&logoColor=white) **Terraform** | Infrastructure as Code (IaC) provisioning AWS EC2 `t3.large` instance, VPC Security Groups (restricting SSH to deployer IP), and RSA deployment key pairs. |
+| ![AWS](https://img.shields.io/badge/AWS-232F3E?style=flat&logo=amazon-aws&logoColor=white) **AWS EC2** | Live cloud host environment (`ap-south-1`), running the full multi-container docker-compose stack. |
 | ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white) **Redis** | Low-latency backing store for semantic caching with automated TTL versioning, powered by a live connection pool initialized at application startup, API key authentication, and rate limiting counters. |
 | ![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white) **ClickHouse** | Columnar database designed for massive OLAP workloads; handles high-throughput telemetry writes without blocking the hot path. |
 | ![Grafana](https://img.shields.io/badge/Grafana-F46800?style=flat&logo=grafana&logoColor=white) **Grafana** | Auto-provisioned dashboards on port 3000 connected to ClickHouse for team spend attribution and p50/p95/p99 provider latency analysis. |
@@ -97,11 +102,12 @@ flowchart TD
 | Feature | Status | Description |
 | :--- | :--- | :--- |
 | **Core Infrastructure** | Live | Dockerized environment (Redis, ClickHouse, FastAPI skeleton), `uvicorn` runner. |
+| **Cloud Deployment** | Live | Automated Terraform IaC deployment on AWS EC2 (`ap-south-1`), exposing Gateway (`8000`) and Grafana (`3000`). |
 | **Observability (Core)** | Live | Structured JSON logging, `X-Request-ID` correlation (`trace_id`), global error handling. |
 | **Completions API** | Live | Single-provider proxy (`POST /v1/chat/completions`) using Gemini 2.5 Flash via LiteLLM. |
 | **Telemetry (Write-Path)** | Live | Asynchronous writes to ClickHouse `llm_metrics` table upon successful completions. |
 | **Semantic Caching** | Live | Exact-match caching is Live: cache key uses a SHA-256 hash of the full normalized message history (all roles, all turns) to guarantee context safety, and embedding generation uses only the latest user message. True cosine-similarity threshold scan against stored vectors remains Planned. |
-| **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine. |
+| **Local Fallback (Ollama)** | Live | Directly wired into the request path via the circuit breaker state machine (`qwen2.5:0.5b`). |
 | **Circuit Breaker** | Live | Full state machine verified (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), including immediate low-latency Ollama fallback and a robust HALF_OPEN concurrent-probe limit (ensuring only a single probe is in-flight via a non-blocking asyncio race condition check). |
 | **Safety Guardrails** | Live | PII redaction (email, phone, Luhn credit card, SSN, IPv4), output toxicity classification (weighted lexicon with meta-discussion filters), and input jailbreak detection (cosine similarity against reference embeddings) are Live on cache-miss paths. |
 | **Auth & Rate Limiting** | Live | Fail-closed API key verification (returns 401 on invalid/missing key, 503 on service unavailability) and sliding-window rate limits per application (returns 429 when limits are exceeded, fails open and degrades gracefully on Redis failure), with real `app_id` routed to telemetry. |
@@ -132,7 +138,7 @@ flowchart TD
    ```
 
 4. **Seed a Test API Key:**
-   Because API Key Authentication is now active and fail-closed, you must seed a valid API key in Redis to authenticate requests. You can seed a test key (`llmgov_sk_dev_app`) that maps to the application identifier `dev_app` by running:
+   Because API Key Authentication is active and fail-closed, seed a valid API key in Redis to authenticate requests (`llmgov_sk_dev_app` mapping to `dev_app`):
    ```bash
    docker compose exec redis redis-cli hset llmgov:auth:5329527556114a7930fefa95d192ba0bdf4097fae6191ae468fae0c8b9c73de8 app_id "dev_app"
    ```
@@ -144,13 +150,27 @@ flowchart TD
    ```
    Expected response: `{"status":"healthy","service":"llmgov-gateway","version":"0.1.0","timestamp":"2026-07-05T16:47:18.532641+00:00"}`
 
+## Live Instance
+
+A live, cloud-deployed instance of the full LLMGov stack is running on AWS EC2 (`ap-south-1`):
+
+* **Gateway API Base URL:** `http://13.207.27.191:8000`
+* **Health Check:** `http://13.207.27.191:8000/health`
+* **Completions Endpoint:** `POST http://13.207.27.191:8000/v1/chat/completions`
+* **Grafana Dashboards:** `http://13.207.27.191:3000` (Credentials: `admin` / `llmgov_dev`)
+
+### Known Limitations (Deployment)
+* **HTTP / TLS:** The current live deployment operates on plain HTTP (port 8000 and port 3000) without TLS/HTTPS termination or a custom domain. Custom SSL/TLS certificates and ingress proxying are out of scope for Phase 1.
+* **Grafana Credentials:** Uses auto-provisioned development credentials (`admin` / `llmgov_dev`).
+* **Post-Deploy Ollama Model Warmup:** Pulling Ollama fallback models (`qwen2.5:0.5b`) is executed as an explicit post-deployment step rather than baked into container image layers.
+
 ## API Example
 
 Here is a real request and response using the `POST /v1/chat/completions` endpoint, demonstrating a successful proxy through the gateway. Note that a valid API key must be supplied in the `Authorization` header.
 
 **Request:**
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+curl -X POST http://13.207.27.191:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer llmgov_sk_dev_app" \
   -d '{
@@ -163,27 +183,28 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 **Response:**
 ```json
 {
-  "id": "69FUao_dK77djuMP6Ky2qAM",
+  "id": "bTFgauvmNMip4-EP04KesA4",
   "object": "chat.completion",
-  "created": 1783943658,
+  "created": 1784689005,
   "model": "gemini-2.5-flash",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "The atmosphere scatters blue sunlight more than other colors."
+        "content": "The sky is blue because Earth's atmosphere scatters blue light more effectively than other colors."
       },
       "finish_reason": "stop"
     }
   ],
   "usage": {
     "prompt_tokens": 13,
-    "completion_tokens": 798,
-    "total_tokens": 811
+    "completion_tokens": 217,
+    "total_tokens": 230
   },
-  "trace_id": "0ba5829a-aaa7-4f2e-812d-405a81d04aa8"
+  "trace_id": "0ed794f9-7e6c-45e8-b43b-9207a3070fc4"
 }
+```
 
 ### PII Redaction Example
 
@@ -191,7 +212,7 @@ When a request contains personally identifiable information (PII), the gateway a
 
 **Request:**
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+curl -X POST http://13.207.27.191:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer llmgov_sk_dev_app" \
   -d '{
@@ -231,7 +252,6 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 ```json
 {"timestamp": "2026-07-18T17:41:58.272606+00:00", "level": "INFO", "logger": "app.api.completions", "message": "Completion returned", "trace_id": "b5bd2bae-5bd6-4973-a1c3-f3d233a2cf64", "model": "gemini-2.5-flash", "provider": "gemini", "latency_ms": 1337.9, "status_code": 200, "has_pii_redacted": true, "toxicity_score": 0.0, "is_toxic": false, "jailbreak_score": 0.124, "is_jailbreak": false}
 ```
-
 
 ## Reliability
 
@@ -283,6 +303,8 @@ LLMGov/
 ├── docs/
 │   ├── adr/                     # Architecture Decision Records
 │   └── LLMGov_Master_Specification.docx
+├── infra/
+│   └── main.tf                  # Terraform IaC for AWS EC2 instance, SG rules & SSH key
 ├── tests/                       # 75+ automated unit and integration tests
 ├── .dockerignore
 ├── .env.example
@@ -296,6 +318,6 @@ LLMGov/
 
 ---
 
-**Author:** LeviAckermanZ9
-**Repository:** [https://github.com/LeviAckermanZ9/LLMGov](https://github.com/LeviAckermanZ9/LLMGov)
+**Author:** LeviAckermanZ9  
+**Repository:** [https://github.com/LeviAckermanZ9/LLMGov](https://github.com/LeviAckermanZ9/LLMGov)  
 **License:** MIT (Placeholder)

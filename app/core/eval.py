@@ -10,6 +10,7 @@ Provides:
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, Union
@@ -17,6 +18,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import jsonschema
 import litellm
 
+from app.config.settings import settings
 from app.core.telemetry import _get_client
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,7 @@ async def run_llm_judge(
             messages=judge_messages,
             temperature=0.0,
             max_tokens=256,
+            api_key=settings.gemini_api_key or os.getenv("GEMINI_API_KEY"),
         )
         content = completion.choices[0].message.content or ""
         

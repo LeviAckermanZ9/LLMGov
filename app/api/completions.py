@@ -23,7 +23,8 @@ from app.core.circuit_breaker import CircuitBreaker
 from app.core.embeddings import generate_embedding
 from litellm.exceptions import Timeout, APIError, RateLimitError, ServiceUnavailableError
 from app.core.logging import get_logger
-from app.core.telemetry import write_metrics
+from app.core.telemetry import write_metrics, record_audit_log
+from app.core.eval import evaluate_and_record_response
 from app.middleware.request_id import get_request_id
 from app.core.pii import redact_pii
 from app.core.toxicity import classify_toxicity
@@ -298,6 +299,29 @@ async def chat_completions(
         status_code=200,
         prompt_tokens=result.usage.prompt_tokens,
         completion_tokens=result.usage.completion_tokens,
+    )
+
+    # ── Audit Log Hash-Chain Write Path (Spec §5.6) ──
+    # Out-of-band background task computing cryptographic hash chain and persisting to ClickHouse
+    import json
+    sanitized_prompt_str = json.dumps(redacted_messages_dicts)
+    background_tasks.add_task(
+        record_audit_log,
+        trace_id=trace_id,
+        sanitized_prompt=sanitized_prompt_str,
+        raw_response=response_content,
+        has_pii_redacted=has_pii_redacted_any,
+        toxicity_score=toxicity_score,
+        jailbreak_score=jailbreak_score,
+    )
+
+    # ── Phase 3: Eval Harness (LLM-as-a-Judge & Schema Validation) Write Path ──
+    # Out-of-band background task running schema validator, LLM judge, and ClickHouse persistence
+    background_tasks.add_task(
+        evaluate_and_record_response,
+        trace_id=trace_id,
+        prompt=latest_user_content,
+        response_text=response_content,
     )
 
     # ── Cache Write Path ──

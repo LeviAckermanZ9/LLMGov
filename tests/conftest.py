@@ -35,6 +35,20 @@ def mock_jailbreak_globally(request):
         yield
 
 @pytest.fixture
+def mock_eval_globally(request):
+    """
+    Globally mock evaluate_and_record_response for all tests that hit the completions
+    endpoint, except dedicated eval tests. This prevents background eval tasks from
+    interfering with completion route test assertions.
+    """
+    if "test_eval" in request.module.__name__:
+        yield
+        return
+
+    with patch("app.api.completions.evaluate_and_record_response", AsyncMock()):
+        yield
+
+@pytest.fixture
 def auth_headers():
     """
     Test helper fixture that seeds a valid API key in the live Redis instance,

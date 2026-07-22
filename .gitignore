@@ -61,3 +61,10 @@ tests/scratch*.py
 *.tfstate.*
 .terraform/
 *.pem
+
+# Personal & Internal Audit Files (Local Only)
+docs/resume_bullets.md
+docs/mock_interview.md
+updates.md
+docs/updates.md
+
